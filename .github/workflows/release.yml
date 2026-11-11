@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: MIT
-# Publishes GitHub release v<version> with Debian, RHEL and Windows builds whenever the package
-# version in Cargo.toml changes on main. The full CI runs first; nothing is tagged unless it and
-# every build pass. Run it by hand (workflow_dispatch on main) to release the current version
-# when it has no tag yet, for example after a failed run.
+# Publishes GitHub release v<version> with Debian, Ubuntu, RHEL, Arch and Windows builds whenever
+# the package version in Cargo.toml changes on main. The full CI runs first; nothing is tagged
+# unless it and every build pass. Then, when their secrets are set, the crate goes to crates.io
+# (CARGO_REGISTRY_TOKEN) and the PKGBUILD to the AUR (AUR_SSH_PRIVATE_KEY); without a secret that
+# step is skipped with a notice. Run it by hand (workflow_dispatch on main) to release the current
+# version when it has no tag yet; after a partial failure, re-run the failed jobs instead.
 name: release
 on:
   push:
@@ -74,32 +76,44 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          # Debian 12: the .deb records the newest glibc symbol it needs, so build on an older base.
-          - name: debian
+          # One .deb per distribution release: each records the glibc it was built against.
+          - name: debian12
             image: debian:bookworm
-            setup: >-
-              apt-get update &&
-              apt-get install -y --no-install-recommends
-              ca-certificates curl git gcc libc6-dev dpkg-dev binutils
+            deb_dist: deb12
+            files: dist/*.deb
+          - name: ubuntu24.04
+            image: ubuntu:24.04
+            deb_dist: ubuntu24.04
+            files: dist/*.deb
+          - name: ubuntu26.04
+            image: ubuntu:26.04
+            deb_dist: ubuntu26.04
             files: dist/*.deb
           # RHEL 8 (glibc 2.28) also gives the portable tarball for other distributions.
           - name: el8
             image: almalinux:8
-            setup: dnf install -y git gcc rpm-build binutils tar gzip findutils
             files: |
               dist/*.rpm
               dist/*.tar.gz
           - name: el9
             image: almalinux:9
-            setup: dnf install -y git gcc rpm-build binutils tar gzip findutils
             files: dist/*.rpm
     runs-on: ubuntu-latest
     container: ${{ matrix.image }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      DEB_DIST: ${{ matrix.deb_dist }}
     steps:
       # git must exist before checkout, or checkout downloads a tree without history.
-      - run: ${{ matrix.setup }}
+      - name: Install build tools
+        run: |
+          if command -v apt-get >/dev/null; then
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                  ca-certificates curl git gcc libc6-dev dpkg-dev binutils
+          else
+              dnf install -y git gcc rpm-build binutils tar gzip findutils
+          fi
       - uses: actions/checkout@v4
       - name: Install Rust
         run: |
@@ -116,8 +130,38 @@ jobs:
       - run: target/release/xe-bug-report --version
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
+          name: pkg-${{ matrix.name }}
           path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  arch:
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - run: pacman -Syu --noconfirm --needed git rust
+      - uses: actions/checkout@v4
+      # makepkg refuses to run as root.
+      - name: Build the pacman package and the AUR files
+        run: |
+          useradd -m builder
+          chown -R builder "$GITHUB_WORKSPACE"
+          su builder -c "git config --global --add safe.directory '$GITHUB_WORKSPACE' &&
+              cd '$GITHUB_WORKSPACE' && scripts/package-arch.sh"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-arch
+          path: |
+            dist/*.pkg.tar.zst
+            dist/*-source.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur
+          path: dist/aur/
+          include-hidden-files: true
           if-no-files-found: error
 
   windows:
@@ -143,12 +187,35 @@ jobs:
           Compress-Archive -Path "stage/$name" -DestinationPath "dist/$name.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
+          name: pkg-windows
           path: dist/*.zip
           if-no-files-found: error
 
+  # Before the GitHub release, so a failure here leaves the version untagged and retryable.
+  crates-io:
+    needs: [version, linux, arch, windows]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to crates.io
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+              echo "::notice::CARGO_REGISTRY_TOKEN is not set; not publishing to crates.io"
+              exit 0
+          fi
+          status=$(curl -s -o /dev/null -w '%{http_code}' -A "xe-bug-report release ($GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/xe-bug-report/$VERSION")
+          if [ "$status" = 200 ]; then
+              echo "::notice::xe-bug-report $VERSION is already on crates.io"
+              exit 0
+          fi
+          cargo publish --locked
+
   publish:
-    needs: [version, linux, windows]
+    needs: [version, linux, arch, windows, crates-io]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -158,6 +225,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: pkg-*
           merge-multiple: true
       - run: cd dist && sha256sum -- * | tee SHA256SUMS
       - env:
@@ -165,3 +233,38 @@ jobs:
         run: |
           gh release create "v$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --title "v$VERSION" --generate-notes
+
+  # After the GitHub release: the PKGBUILD downloads the source tarball attached to it.
+  aur:
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: aur
+          path: aur-files
+      - name: Push the PKGBUILD to the AUR
+        run: |
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+              echo "::notice::AUR_SSH_PRIVATE_KEY is not set; not pushing to the AUR"
+              exit 0
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" >~/.ssh/aur
+          chmod 0600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >>~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes"
+          git clone ssh://aur@aur.archlinux.org/xe-bug-report.git aur
+          cp aur-files/PKGBUILD aur-files/.SRCINFO aur/
+          cd aur
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+              echo "::notice::the AUR already has this PKGBUILD"
+              exit 0
+          fi
+          git -c user.name="Avery, Sean" -c user.email="165802734+savery42@users.noreply.github.com" \
+              commit -m "Update to $VERSION"
+          git push origin HEAD:master

@@ -34,28 +34,27 @@ This tool is created for my own benefit as a user of a B70 Pro card while workin
 ## Install
 
 Each version is published on the
-[releases page](https://github.com/team-blue-savery42/xe-bug-report/releases): a `.deb` for
-Debian and Ubuntu, `.rpm` packages for RHEL 8 and 9 (and their rebuilds), a portable Linux
-`.tar.gz` (glibc 2.28 or newer), a Windows `.zip` and `SHA256SUMS`.
+[releases page](https://github.com/team-blue-savery42/xe-bug-report/releases) with `SHA256SUMS`:
 
-Build from source with Rust 1.99 or newer (`rust-toolchain.toml` pins 1.99.1, the toolchain CI uses):
+| System | File |
+|---|---|
+| Debian 12 and newer | `xe-bug-report_<version>_deb12_amd64.deb` |
+| Ubuntu 24.04 / 26.04 | `xe-bug-report_<version>_ubuntu24.04_amd64.deb` / `..._ubuntu26.04_amd64.deb` |
+| RHEL 8 / 9 and rebuilds (Alma, Rocky) | `xe-bug-report-<version>-1.el8.x86_64.rpm` / `...-1.el9.x86_64.rpm` |
+| Arch Linux | `xe-bug-report-<version>-1-x86_64.pkg.tar.zst`, or the AUR package `xe-bug-report` |
+| any Linux with glibc 2.28 or newer | `xe-bug-report-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| Windows (x86-64) | `xe-bug-report-<version>-x86_64-pc-windows-msvc.zip` |
+
+From crates.io or source (Rust 1.99 or newer; `rust-toolchain.toml` pins 1.99.1):
 
 ```sh
-cargo build --release --locked
-# the binary is target/release/xe-bug-report
+cargo install --locked xe-bug-report
+cargo build --release --locked    # target/release/xe-bug-report
 ```
 
-Packages are built by `scripts/package.sh`. It runs the same release build, then writes to `dist/`:
-
-| File | When |
-|---|---|
-| `xe-bug-report-<version>-<target>.tar.gz` (binary, `LICENSE`, `README.md`) | always |
-| `xe-bug-report_<version>_<arch>.deb` (installs `/usr/bin/xe-bug-report`; depends on `libc6 (>= <glibc it was built against>)` and `libgcc-s1`) | `dpkg-deb` is installed |
-| `xe-bug-report-<version>-1<dist>.<arch>.rpm` (installs `/usr/bin/xe-bug-report`) | `rpmbuild` is installed |
-
-The Linux binary depends only on glibc (`libc`, `libgcc_s`), at the version it was built against
-(the `.deb` records it; check with `objdump -T xe-bug-report | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1`). No installation is needed to run it:
-the binary can be executed from wherever it was copied.
+The Linux binary needs only glibc (`libc`, `libgcc_s`) at the version it was built against:
+`objdump -T xe-bug-report | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1`. It runs from wherever
+it is copied. Packaging is described in [CONTRIBUTING.md](CONTRIBUTING.md#packaging).
 
 ## Dependencies
 

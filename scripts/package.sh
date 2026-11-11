@@ -5,6 +5,8 @@
 #   dist/xe-bug-report_<version>_<arch>.deb        when dpkg-deb exists (packaging/deb/control)
 #   dist/xe-bug-report-<version>-1<dist>.<arch>.rpm when rpmbuild exists (packaging/rpm/xe-bug-report.spec)
 # Usage: scripts/package.sh        (from anywhere; builds for the host target)
+# DEB_DIST=<tag> (e.g. deb12, ubuntu24.04) builds a .deb for one distribution release: its version
+# becomes <version>-1~<tag> and the file dist/xe-bug-report_<version>_<tag>_<arch>.deb.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -78,10 +80,22 @@ if command -v dpkg-deb >/dev/null 2>&1; then
         echo "objdump not found or no GLIBC symbols; the .deb gets an unversioned libc6 dependency" >&2
         libc6=libc6
     fi
-    sed -e "s/@VERSION@/$version/" -e "s/@ARCH@/$deb_arch/" -e "s/@LIBC6@/$libc6/" \
+    deb_version=$version
+    deb=$dist/${name}_${version}_$deb_arch.deb
+    if [ -n "${DEB_DIST:-}" ]; then
+        case "$DEB_DIST" in
+            *[!A-Za-z0-9.]*)
+                echo "package.sh: DEB_DIST may hold only letters, digits and dots" >&2
+                exit 1
+                ;;
+        esac
+        # "~" sorts the build below a distribution's own <version>-1.
+        deb_version=$version-1~$DEB_DIST
+        deb=$dist/${name}_${version}_${DEB_DIST}_$deb_arch.deb
+    fi
+    sed -e "s/@VERSION@/$deb_version/" -e "s/@ARCH@/$deb_arch/" -e "s/@LIBC6@/$libc6/" \
         packaging/deb/control >"$tree/DEBIAN/control"
     echo "Installed-Size: $size" >>"$tree/DEBIAN/control"
-    deb=$dist/${name}_${version}_$deb_arch.deb
     dpkg-deb --root-owner-group --build "$tree" "$deb" >/dev/null
     echo "wrote $deb"
 else

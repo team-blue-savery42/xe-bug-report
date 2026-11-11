@@ -58,7 +58,10 @@ shellcheck scripts/*.sh
 ## Packaging
 
 - `scripts/package.sh` builds the release binary into `dist/`: a `.tar.gz` always, a `.deb` when
-  `dpkg-deb` exists, an `.rpm` when `rpmbuild` exists.
+  `dpkg-deb` exists, an `.rpm` when `rpmbuild` exists. `DEB_DIST=<tag>` names the `.deb` per
+  distribution (version `<version>-1~<tag>`).
+- `scripts/package-arch.sh` builds the pacman package, its source tarball and the AUR `PKGBUILD`
+  and `.SRCINFO`. It runs on Arch as a non-root user.
 - The `.deb` depends on `libc6 (>= <glibc the binary references>)` and `libgcc-s1`.
 
 ## Releasing
