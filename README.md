@@ -18,6 +18,7 @@ This tool is created for my own benefit as a user of a B70 Pro card while workin
 - [Install](#install)
 - [Dependencies](#dependencies)
 - [Usage](#usage)
+- [Configuration file](#configuration-file)
 - [Profiles](#profiles)
 - [Exit codes](#exit-codes)
 - [What is collected](#what-is-collected)
@@ -61,7 +62,7 @@ it is copied. Packaging is described in [CONTRIBUTING.md](CONTRIBUTING.md#packag
 The binary needs only glibc on Linux. On Windows the C runtime is linked in, so it needs nothing
 beyond Windows itself. Every tool below is optional: a missing one leaves its sources `skipped` with
 `<tool> not installed`, and the rest of the bundle is collected. Tools are found on
-PATH.
+PATH or the [configuration file](#configuration-file).
 
 Linux:
 
@@ -237,6 +238,39 @@ With `--json`, stdout is the result object, and on failure an error object (exit
 ```
 
 Non-UTF-8 file names are converted lossily, so the JSON is always valid.
+
+## Configuration file
+
+When tools live outside PATH (an `xpu-smi` in `/opt`, `iclg` from a crash-log package), say where
+once in `~/.config/xe-bug-report/config` (`$XDG_CONFIG_HOME/xe-bug-report/config` when that is
+set; `%APPDATA%\xe-bug-report\config` on Windows). The file is optional and read only when it
+exists:
+
+```ini
+[tools]
+xpu-smi = /opt/intel/xpu-smi/bin/xpu-smi
+iclg = /opt/intel/crashlog/iclg
+
+[search]
+# Searched, in order, for every tool without its own line, before PATH.
+dir = /opt/intel/oneapi/bin
+```
+
+- `[tools]` names one executable per tool, by the command name the sources use (`xpu-smi`, `iclg`,
+  `lspci`, `clinfo`, `vulkaninfo`, ...). A relative path is taken from the file's directory. An
+  entry that is not an executable file is warned about and the tool is looked up as usual.
+- `[search]` adds directories with `dir = <directory>`, one per line.
+- Lines are `name = value`, `[section]` or comments starting with `#` or `;`. The value is the rest
+  of the line (no trailing comments, so paths may hold `#`); one pair of surrounding quotes is
+  removed. Unknown sections are ignored with a warning, so newer files still work.
+- `--xpu-smi` still wins over the file. The file decides which programs run, so it is not used
+  when users other than its owner may write to it, or when it belongs to anyone but the user
+  running `xe-bug-report`, root, or (under sudo) the user who ran sudo; a broken or untrusted file
+  stops the run with exit code 1.
+- `sudo` usually switches to root's home directory, so `sudo xe-bug-report` reads
+  `/root/.config/xe-bug-report/config`. To use your own, keep the variables:
+  `sudo --preserve-env=HOME,XDG_CONFIG_HOME xe-bug-report`.
+- `system/env.txt` records where each diagnostic tool was found, so the bundle shows the result.
 
 ## Profiles
 

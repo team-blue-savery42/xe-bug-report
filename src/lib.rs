@@ -9,6 +9,7 @@ pub mod archive;
 pub mod build_info;
 pub mod bundle;
 pub mod cli;
+pub mod config;
 pub mod diag;
 pub mod error;
 pub mod guard;

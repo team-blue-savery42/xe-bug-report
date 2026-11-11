@@ -14,7 +14,7 @@ use windows as imp;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus, Stdio};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -188,8 +188,76 @@ pub fn read_nonblocking_bounded(path: &Path, max: Bytes, keep: Keep) -> ReadResu
 /// relative PATH entries are skipped, so only absolute directories are searched. A `program`
 /// containing a path separator is returned as-is when it is an executable file (so a caller that
 /// wants a relative tool passes it with a separator).
+///
+/// A bare `program` is first looked up in the [`ToolLocations`] installed with
+/// [`set_tool_locations`] (the configuration file): its own entry, then the extra directories.
 pub fn find_in_path(program: &str) -> Option<PathBuf> {
+    if !has_separator(program)
+        && let Some(found) = TOOL_LOCATIONS.get().and_then(|locations| locations.find(program))
+    {
+        return Some(found);
+    }
     imp::find_in_path(program)
+}
+
+/// Where the configuration file says the tools are; consulted by [`find_in_path`] before PATH.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolLocations {
+    /// Per-tool executables: (bare name, absolute path), in file order.
+    pub tools: Vec<(String, PathBuf)>,
+    /// Absolute directories searched, in order, for any tool without its own entry, before PATH.
+    pub dirs: Vec<PathBuf>,
+}
+
+impl ToolLocations {
+    /// The executable for `program`: its own entry when that is an executable file, else the
+    /// first of the directories that holds it. None when neither does (PATH is then searched).
+    /// Names compare exactly on Unix and ignoring ASCII case and a trailing `.exe` on Windows.
+    pub fn find(&self, program: &str) -> Option<PathBuf> {
+        let own = self.tools.iter().find(|(name, _)| same_tool(name, program));
+        if let Some(found) = own.and_then(|(_, path)| executable_at(path)) {
+            return Some(found);
+        }
+        self.dirs.iter().filter(|dir| dir.is_absolute()).find_map(|dir| executable_at(&dir.join(program)))
+    }
+
+    /// The per-tool entries whose path is not an executable file (and so are passed over).
+    pub fn unusable(&self) -> Vec<&(String, PathBuf)> {
+        self.tools.iter().filter(|(_, path)| executable_at(path).is_none()).collect()
+    }
+}
+
+/// Installed once, before the first lookup; see [`find_in_path`].
+static TOOL_LOCATIONS: OnceLock<ToolLocations> = OnceLock::new();
+
+/// Makes [`find_in_path`] consult `locations` first. Only the first call takes effect; false when
+/// locations were already installed.
+pub fn set_tool_locations(locations: ToolLocations) -> bool {
+    TOOL_LOCATIONS.set(locations).is_ok()
+}
+
+/// Whether the configured `name` is the looked-up `program`.
+fn same_tool(name: &str, program: &str) -> bool {
+    if cfg!(windows) {
+        let strip = |text: &str| {
+            let lower = text.to_ascii_lowercase();
+            lower.strip_suffix(".exe").map(str::to_owned).unwrap_or(lower)
+        };
+        strip(name) == strip(program)
+    } else {
+        name == program
+    }
+}
+
+/// `path` when it is an executable file (on Windows, also `path` with a PATHEXT extension).
+fn executable_at(path: &Path) -> Option<PathBuf> {
+    let text = path.to_str()?;
+    // Only absolute paths: the per-OS lookup would treat anything else relative to the current
+    // directory, which a configured location never means.
+    if !path.is_absolute() {
+        return None;
+    }
+    imp::find_in_path(text)
 }
 
 /// The path of the running executable.

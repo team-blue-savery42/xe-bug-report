@@ -20,9 +20,9 @@ use xe_bug_report::bundle::writer::{
 };
 use xe_bug_report::cli::{self, Args, CliExit, USAGE_HINT};
 use xe_bug_report::guard::Guard;
-use xe_bug_report::procio::find_in_path;
+use xe_bug_report::procio::{find_in_path, set_tool_locations};
 use xe_bug_report::redact::Rules;
-use xe_bug_report::{GpuDevice, SourceOptions, diag, sources};
+use xe_bug_report::{GpuDevice, SourceOptions, config, diag, sources};
 
 /// Process exit code of a failed run.
 const EXIT_FAILURE: i32 = 1;
@@ -83,6 +83,28 @@ fn resolve_xpu_smi(explicit: Option<&Path>) -> Option<PathBuf> {
         log::warn!("--xpu-smi {}: not an existing file; the xpu-smi sources are skipped", display_path(path));
     }
     on_path
+}
+
+/// Loads the configuration file and installs its tool locations before the first PATH lookup.
+/// Its notes and the entries that point at no executable are logged as warnings.
+fn apply_config() -> Result<(), String> {
+    let Some(config) = config::load()? else {
+        log::debug!("no configuration file");
+        return Ok(());
+    };
+    log::debug!("configuration: {}", display_path(&config.path));
+    for warning in &config.warnings {
+        log::warn!("{}: {warning}", display_path(&config.path));
+    }
+    for (name, path) in config.locations.unusable() {
+        log::warn!(
+            "{}: {name} = {}: not an executable file; {name} is looked up as usual",
+            display_path(&config.path),
+            display_path(path)
+        );
+    }
+    set_tool_locations(config.locations);
+    Ok(())
 }
 
 /// The GPUs the OS reports; the enumeration reads sysfs (or runs a query), so it is guarded like
@@ -164,6 +186,9 @@ fn run(args: &Args) -> i32 {
         start_backstop(deadline, (!args.list).then(|| output.clone()));
     }
 
+    if let Err(message) = apply_config() {
+        return fail(args.json, &message);
+    }
     let devices = match cli::select_devices(&args.devices, enumerate_gpus()) {
         Ok(devices) => devices,
         Err(error) => return fail(args.json, &error.to_string()),
