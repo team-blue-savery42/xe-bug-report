@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: MIT
+# Line, function and region coverage of the test suite (cargo llvm-cov, Linux), shown in the run's
+# summary; the lcov file is kept as an artifact for a coverage service once the repository is public.
+name: coverage
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup component add llvm-tools-preview
+      - run: cargo install --locked cargo-llvm-cov
+      - run: cargo llvm-cov --locked --all-features --lcov --output-path lcov.info
+      - name: Summary
+        run: |
+          cargo llvm-cov report --summary-only >coverage.txt
+          # Columns: name, regions (3), functions (3), lines (3); each group ends with its cover.
+          totals=$(awk '$1 == "TOTAL" { print $10, $7, $4 }' coverage.txt)
+          # shellcheck disable=SC2086 # three words on purpose
+          set -- $totals
+          lines=${1:-} functions=${2:-} regions=${3:-}
+          if [ -z "$lines" ]; then
+              echo "::error::no TOTAL line in the coverage report"
+              exit 1
+          fi
+          echo "::notice::coverage: $lines of lines, $functions of functions"
+          {
+              echo "## Coverage: $lines of lines"
+              echo
+              echo "| Lines | Functions | Regions |"
+              echo "|---|---|---|"
+              echo "| $lines | $functions | $regions |"
+              echo
+              echo "<details><summary>Per file</summary>"
+              echo
+              echo '```text'
+              cat coverage.txt
+              echo '```'
+              echo
+              echo "</details>"
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info
+          if-no-files-found: error

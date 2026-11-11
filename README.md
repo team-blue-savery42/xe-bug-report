@@ -1,6 +1,12 @@
 <!-- SPDX-License-Identifier: MIT -->
 # xe-bug-report
 
+[![ci](https://github.com/team-blue-savery42/xe-bug-report/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/team-blue-savery42/xe-bug-report/actions/workflows/ci.yml)
+[![coverage](https://github.com/team-blue-savery42/xe-bug-report/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/team-blue-savery42/xe-bug-report/actions/workflows/coverage.yml)
+[![release](https://github.com/team-blue-savery42/xe-bug-report/actions/workflows/release.yml/badge.svg)](https://github.com/team-blue-savery42/xe-bug-report/actions/workflows/release.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/team-blue-savery42/xe-bug-report/blob/main/LICENSE)
+[![MSRV: 1.99](https://img.shields.io/badge/MSRV-1.99-orange.svg)](https://github.com/team-blue-savery42/xe-bug-report/blob/main/Cargo.toml)
+
 GPU diagnostic collector for Linux and Windows. Writes one redacted zip of kernel logs, sysfs and
 debugfs attributes, PCI state, package lists and `xpu-smi` output, with a `manifest.json` that
 records what was collected, what was not, and why.
