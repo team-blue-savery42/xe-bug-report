@@ -21,3 +21,10 @@ fn epoch_is_formatted_as_human_utc() {
     assert_eq!(human_from_epoch("0"), "1970-01-01 00:00:00 UTC");
     assert_eq!(human_from_epoch("1783629511"), "2026-07-09 20:38:31 UTC");
 }
+
+#[test]
+fn the_readme_badge_shows_the_minimum_rust_version() {
+    let readme = include_str!("../README.md");
+    let badge = format!("badge/MSRV-{}-", env!("CARGO_PKG_RUST_VERSION"));
+    assert!(readme.contains(&badge), "README.md has no {badge} badge; update it with rust-version");
+}

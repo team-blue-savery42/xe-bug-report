@@ -43,6 +43,9 @@ shellcheck scripts/*.sh
   run on the `windows-latest` CI runner.
 - The redaction timing test runs only in release builds:
   `cargo test --release --locked redact -- --ignored`.
+- Coverage: `cargo llvm-cov --all-features` (needs `llvm-tools-preview` and `cargo-llvm-cov`). CI
+  reports it in the run summary of `coverage.yml` and on Codecov.
+- The MSRV badge in `README.md` must match `rust-version`; a test checks it.
 
 ## Dependencies
 
