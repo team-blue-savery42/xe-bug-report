@@ -1,0 +1,164 @@
+{
+  "schema": 1,
+  "tool": {
+    "version": "2.3.0",
+    "describe": "v2.3.0-0-g012345678",
+    "commit": "0123456789ab",
+    "built": "2026-01-02 03:04:05 UTC",
+    "path": "/usr/bin/xpu-smi"
+  },
+  "created": "2026-11-10T14:31:30Z",
+  "os": "Ubuntu 24.04.3 LTS, Linux 7.2.0-generic x86_64",
+  "profile": "minimal",
+  "devices": [
+    "0000:03:00.0"
+  ],
+  "redaction": [
+    "serials",
+    "hostname",
+    "users",
+    "addresses"
+  ],
+  "compression": "deflate",
+  "sources": [
+    {
+      "path": "xpu-smi/version.txt",
+      "status": "collected",
+      "bytes": 363,
+      "ms": 4
+    },
+    {
+      "path": "system/os-release",
+      "status": "collected",
+      "bytes": 400,
+      "ms": 1
+    },
+    {
+      "path": "system/uname.txt",
+      "status": "collected",
+      "bytes": 167,
+      "ms": 4
+    },
+    {
+      "path": "system/cmdline",
+      "status": "collected",
+      "bytes": 202,
+      "ms": 1
+    },
+    {
+      "path": "system/modules",
+      "status": "collected",
+      "bytes": 8240,
+      "ms": 1
+    },
+    {
+      "path": "system/env.txt",
+      "status": "collected",
+      "bytes": 497,
+      "ms": 2
+    },
+    {
+      "path": "system/id.txt",
+      "status": "collected",
+      "bytes": 236,
+      "ms": 6
+    },
+    {
+      "path": "system/container.txt",
+      "status": "collected",
+      "bytes": 152,
+      "ms": 5
+    },
+    {
+      "path": "system/security.txt",
+      "status": "collected",
+      "bytes": 267,
+      "ms": 14
+    },
+    {
+      "path": "system/dev-dri.txt",
+      "status": "collected",
+      "bytes": 241,
+      "ms": 1
+    },
+    {
+      "path": "system/dmi.txt",
+      "status": "collected",
+      "bytes": 310,
+      "ms": 6
+    },
+    {
+      "path": "system/dmi-serials/",
+      "status": "skipped",
+      "reason": "withheld because it cannot be redacted; use --no-redact",
+      "ms": 0
+    },
+    {
+      "path": "system/ldconfig.txt",
+      "status": "collected",
+      "via": "ldconfig -p",
+      "bytes": 2487,
+      "ms": 6
+    },
+    {
+      "path": "kernel/kmsg.txt",
+      "status": "collected",
+      "via": "journalctl -k -b 0 -n 200000 --no-pager -q -o short-monotonic",
+      "bytes": 1984307,
+      "ms": 1724
+    },
+    {
+      "path": "kernel/modinfo-xe.txt",
+      "status": "collected",
+      "via": "modinfo xe",
+      "bytes": 23695,
+      "ms": 8
+    },
+    {
+      "path": "devices/0000-03-00.0/sysfs/",
+      "status": "truncated",
+      "gate": "root",
+      "reason": "4 of 156 files denied; needs root",
+      "bytes": 1037,
+      "files": 152,
+      "denied": 4,
+      "ms": 22
+    },
+    {
+      "path": "devices/0000-03-00.0/links.txt",
+      "status": "collected",
+      "bytes": 68,
+      "ms": 0
+    },
+    {
+      "path": "devices/0000-03-00.0/ras-counters.json",
+      "status": "skipped",
+      "via": "drm-ras generic netlink",
+      "reason": "kernel has no drm-ras interface",
+      "ms": 7
+    },
+    {
+      "path": "pci/0000-03-00.0/lspci-vvv-0000-03-00.0.txt",
+      "status": "truncated",
+      "via": "lspci -vvv -nn -s 0000:03:00.0",
+      "gate": "sys_admin",
+      "reason": "needs root or CAP_SYS_ADMIN",
+      "bytes": 715,
+      "ms": 30
+    },
+    {
+      "path": "packages/dpkg.txt",
+      "status": "collected",
+      "via": "dpkg-query -W -f=${Package}\\t${Version}\\t${db:Status-Abbrev}\\n",
+      "bytes": 2379,
+      "ms": 37
+    },
+    {
+      "path": "xpu-smi/discovery.json",
+      "status": "collected",
+      "via": "xpu-smi discovery -j",
+      "bytes": 407,
+      "ms": 396
+    }
+  ]
+}

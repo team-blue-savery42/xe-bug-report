@@ -1,0 +1,8 @@
+Package: xe-bug-report
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: @ARCH@
+Maintainer: xe-bug-report maintainers
+Description: Standalone GPU diagnostic collector
+ Writes a redacted zip bundle of kernel logs, sysfs, PCI state and xpu-smi output.

@@ -1,0 +1,31 @@
+# Manifest schema 1, keys in emission order.
+# "?" marks a key present only when its condition holds; xpu_smi is additive in xe-bug-report.
+top schema
+top tool
+top created
+top os?
+top profile
+top since_minutes?
+top devices?
+top redaction
+top compression
+top identity?
+top xpu_smi?
+top sources
+tool version
+tool describe?
+tool commit?
+tool built?
+tool path?
+xpu_smi path
+xpu_smi version
+source path
+source status
+source via?
+source gate?
+source reason?
+source exit?
+source bytes?
+source files?
+source denied?
+source ms

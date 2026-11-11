@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Link the C runtime statically on Windows: the binary then runs without the Visual C++
+# redistributable, which a freshly installed or broken machine may lack. Cargo ignores this when
+# RUSTFLAGS is set, so CI must not set it.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

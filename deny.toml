@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: MIT
+# cargo deny check: licenses, sources, bans, advisories.
+
+[graph]
+all-features = false
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "Unicode-3.0", "Zlib"]
+confidence-threshold = 0.9
+unused-allowed-license = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+# The direct dependencies. A new direct dependency must be added here on purpose.
+allow = [
+    { crate = "xe-bug-report" },
+    # direct
+    { crate = "anyhow" },
+    { crate = "clap" },
+    { crate = "crc32fast" },
+    { crate = "flate2" },
+    { crate = "libc" },
+    { crate = "log" },
+    { crate = "serde" },
+    { crate = "serde_json" },
+    { crate = "tempfile" },
+    { crate = "thiserror" },
+    { crate = "time" },
+    { crate = "windows-sys" },
+    # transitive, reviewed with cargo tree; listed so `allow` does not reject them
+    { crate = "adler2" },
+    { crate = "anstyle" },
+    { crate = "bitflags" },
+    { crate = "cfg-if" },
+    { crate = "clap_builder" },
+    { crate = "clap_lex" },
+    { crate = "deranged" },
+    { crate = "equivalent" },
+    { crate = "errno" },
+    { crate = "fastrand" },
+    { crate = "foldhash" },
+    { crate = "getrandom" },
+    { crate = "hashbrown" },
+    { crate = "indexmap" },
+    { crate = "itoa" },
+    { crate = "linux-raw-sys" },
+    { crate = "memchr" },
+    { crate = "miniz_oxide" },
+    { crate = "num-conv" },
+    { crate = "once_cell" },
+    { crate = "powerfmt" },
+    { crate = "proc-macro2" },
+    { crate = "quote" },
+    { crate = "r-efi" },
+    { crate = "rustix" },
+    { crate = "serde_core" },
+    { crate = "serde_derive" },
+    { crate = "simd-adler32" },
+    { crate = "syn" },
+    { crate = "thiserror-impl" },
+    { crate = "time-core" },
+    { crate = "time-macros" },
+    { crate = "unicode-ident" },
+    { crate = "windows-link" },
+    { crate = "zmij" },
+]

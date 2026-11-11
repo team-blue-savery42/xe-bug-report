@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+# Golden fixtures are compared byte for byte with generated output (LF), so Windows checkouts
+# must not convert them to CRLF.
+* text=auto eol=lf

@@ -1,0 +1,394 @@
+{
+  "schema": 1,
+  "tool": {
+    "version": "2.3.0",
+    "describe": "v2.3.0-0-g012345678",
+    "commit": "0123456789ab",
+    "built": "2026-01-02 03:04:05 UTC",
+    "path": "/usr/bin/xpu-smi"
+  },
+  "created": "2026-11-10T14:31:39Z",
+  "os": "Ubuntu 24.04.3 LTS, Linux 7.2.0-generic x86_64",
+  "profile": "default",
+  "devices": [
+    "0000:03:00.0"
+  ],
+  "redaction": [
+    "serials",
+    "hostname",
+    "users",
+    "addresses"
+  ],
+  "compression": "deflate",
+  "sources": [
+    {
+      "path": "xpu-smi/version.txt",
+      "status": "collected",
+      "bytes": 363,
+      "ms": 6
+    },
+    {
+      "path": "system/os-release",
+      "status": "collected",
+      "bytes": 400,
+      "ms": 0
+    },
+    {
+      "path": "system/uname.txt",
+      "status": "collected",
+      "bytes": 167,
+      "ms": 0
+    },
+    {
+      "path": "system/cmdline",
+      "status": "collected",
+      "bytes": 202,
+      "ms": 0
+    },
+    {
+      "path": "system/modules",
+      "status": "collected",
+      "bytes": 8240,
+      "ms": 0
+    },
+    {
+      "path": "system/cpuinfo",
+      "status": "collected",
+      "bytes": 28104,
+      "ms": 1
+    },
+    {
+      "path": "system/meminfo",
+      "status": "collected",
+      "bytes": 1671,
+      "ms": 1
+    },
+    {
+      "path": "system/interrupts",
+      "status": "collected",
+      "bytes": 13009,
+      "ms": 1
+    },
+    {
+      "path": "system/iomem",
+      "status": "collected",
+      "bytes": 5424,
+      "ms": 0
+    },
+    {
+      "path": "system/env.txt",
+      "status": "collected",
+      "bytes": 497,
+      "ms": 1
+    },
+    {
+      "path": "system/id.txt",
+      "status": "collected",
+      "bytes": 236,
+      "ms": 4
+    },
+    {
+      "path": "system/container.txt",
+      "status": "collected",
+      "bytes": 152,
+      "ms": 1
+    },
+    {
+      "path": "system/virt.txt",
+      "status": "collected",
+      "via": "systemd-detect-virt",
+      "exit": 1,
+      "bytes": 5,
+      "ms": 8
+    },
+    {
+      "path": "system/security.txt",
+      "status": "collected",
+      "bytes": 267,
+      "ms": 6
+    },
+    {
+      "path": "system/dev-dri.txt",
+      "status": "collected",
+      "bytes": 241,
+      "ms": 1
+    },
+    {
+      "path": "system/dmi.txt",
+      "status": "collected",
+      "bytes": 310,
+      "ms": 3
+    },
+    {
+      "path": "system/dmi-serials/",
+      "status": "skipped",
+      "reason": "withheld because it cannot be redacted; use --no-redact",
+      "ms": 0
+    },
+    {
+      "path": "system/ldconfig.txt",
+      "status": "collected",
+      "via": "ldconfig -p",
+      "bytes": 2487,
+      "ms": 12
+    },
+    {
+      "path": "kernel/kmsg.txt",
+      "status": "collected",
+      "via": "journalctl -k -b 0 -n 200000 --no-pager -q -o short-monotonic",
+      "bytes": 1984307,
+      "ms": 1440
+    },
+    {
+      "path": "kernel/kmsg-prev-boot.txt",
+      "status": "collected",
+      "via": "journalctl -k -b -1 -n 200000 --no-pager -q -o short-monotonic",
+      "bytes": 320419,
+      "ms": 419
+    },
+    {
+      "path": "kernel/modinfo-xe.txt",
+      "status": "collected",
+      "via": "modinfo xe",
+      "bytes": 23695,
+      "ms": 6
+    },
+    {
+      "path": "kernel/modinfo-i915.txt",
+      "status": "collected",
+      "via": "modinfo i915",
+      "bytes": 34851,
+      "ms": 8
+    },
+    {
+      "path": "kernel/dkms.txt",
+      "status": "collected",
+      "via": "dkms status",
+      "ms": 121
+    },
+    {
+      "path": "kernel/firmware.txt",
+      "status": "collected",
+      "bytes": 4141,
+      "ms": 7
+    },
+    {
+      "path": "kernel/xe-parameters/",
+      "status": "truncated",
+      "gate": "root",
+      "reason": "45 of 60 files denied; needs root",
+      "bytes": 45,
+      "files": 15,
+      "denied": 45,
+      "ms": 5
+    },
+    {
+      "path": "kernel/drm-debug.txt",
+      "status": "skipped",
+      "gate": "root",
+      "reason": "needs root",
+      "ms": 0
+    },
+    {
+      "path": "devices/0000-03-00.0/sysfs/",
+      "status": "truncated",
+      "gate": "root",
+      "reason": "4 of 156 files denied; needs root",
+      "bytes": 1037,
+      "files": 152,
+      "denied": 4,
+      "ms": 24
+    },
+    {
+      "path": "devices/0000-03-00.0/links.txt",
+      "status": "collected",
+      "bytes": 68,
+      "ms": 5
+    },
+    {
+      "path": "devices/0000-03-00.0/debugfs/",
+      "status": "skipped",
+      "gate": "root",
+      "reason": "needs root",
+      "ms": 4
+    },
+    {
+      "path": "dumps/0000-03-00.0/pmt-crashlog1.bin",
+      "status": "skipped",
+      "via": "/sys/class/intel_pmt/crashlog1",
+      "gate": "root",
+      "reason": "needs root",
+      "ms": 6
+    },
+    {
+      "path": "dumps/0000-03-00.0/pmt-crashlog2.bin",
+      "status": "skipped",
+      "via": "/sys/class/intel_pmt/crashlog2",
+      "gate": "root",
+      "reason": "needs root",
+      "ms": 6
+    },
+    {
+      "path": "dumps/0000-03-00.0/pmt-crashlog1.txt",
+      "status": "collected",
+      "via": "/sys/class/intel_pmt/crashlog1",
+      "bytes": 82,
+      "ms": 15
+    },
+    {
+      "path": "dumps/0000-03-00.0/pmt-crashlog2.txt",
+      "status": "collected",
+      "via": "/sys/class/intel_pmt/crashlog2",
+      "bytes": 82,
+      "ms": 15
+    },
+    {
+      "path": "devices/0000-03-00.0/ras-counters.json",
+      "status": "skipped",
+      "via": "drm-ras generic netlink",
+      "reason": "kernel has no drm-ras interface",
+      "ms": 5
+    },
+    {
+      "path": "pci/lspci-nn.txt",
+      "status": "collected",
+      "via": "lspci -nn",
+      "bytes": 2761,
+      "ms": 51
+    },
+    {
+      "path": "pci/lspci-tree.txt",
+      "status": "collected",
+      "via": "lspci -tv",
+      "bytes": 1498,
+      "ms": 41
+    },
+    {
+      "path": "pci/0000-03-00.0/lspci-vvv-0000-03-00.0.txt",
+      "status": "truncated",
+      "via": "lspci -vvv -nn -s 0000:03:00.0",
+      "gate": "sys_admin",
+      "reason": "needs root or CAP_SYS_ADMIN",
+      "bytes": 715,
+      "ms": 42
+    },
+    {
+      "path": "pci/0000-03-00.0/lspci-vvv-0000-02-01.0.txt",
+      "status": "truncated",
+      "via": "lspci -vvv -nn -s 0000:02:01.0",
+      "gate": "sys_admin",
+      "reason": "needs root or CAP_SYS_ADMIN",
+      "bytes": 962,
+      "ms": 47
+    },
+    {
+      "path": "pci/0000-03-00.0/lspci-vvv-0000-01-00.0.txt",
+      "status": "truncated",
+      "via": "lspci -vvv -nn -s 0000:01:00.0",
+      "gate": "sys_admin",
+      "reason": "needs root or CAP_SYS_ADMIN",
+      "bytes": 1030,
+      "ms": 43
+    },
+    {
+      "path": "pci/0000-03-00.0/lspci-vvv-0000-00-01.0.txt",
+      "status": "truncated",
+      "via": "lspci -vvv -nn -s 0000:00:01.0",
+      "gate": "sys_admin",
+      "reason": "needs root or CAP_SYS_ADMIN",
+      "bytes": 1013,
+      "ms": 31
+    },
+    {
+      "path": "pci/0000-03-00.0/lspci-xxxx.txt",
+      "status": "skipped",
+      "gate": "sys_admin",
+      "reason": "needs root or CAP_SYS_ADMIN",
+      "ms": 0
+    },
+    {
+      "path": "packages/dpkg.txt",
+      "status": "collected",
+      "via": "dpkg-query -W -f=${Package}\\t${Version}\\t${db:Status-Abbrev}\\n",
+      "bytes": 2379,
+      "ms": 53
+    },
+    {
+      "path": "packages/dpkg-log.txt",
+      "status": "collected",
+      "bytes": 518,
+      "ms": 0
+    },
+    {
+      "path": "packages/apt-history.log",
+      "status": "collected",
+      "bytes": 289,
+      "ms": 0
+    },
+    {
+      "path": "xpu-smi/discovery.json",
+      "status": "collected",
+      "via": "xpu-smi discovery -j",
+      "bytes": 407,
+      "ms": 295
+    },
+    {
+      "path": "xpu-smi/topology.txt",
+      "status": "collected",
+      "via": "xpu-smi topology -m",
+      "bytes": 260,
+      "ms": 317
+    },
+    {
+      "path": "xpu-smi/0000-03-00.0/discovery.json",
+      "status": "collected",
+      "via": "xpu-smi discovery -d 0000:03:00.0 -j",
+      "bytes": 1922,
+      "ms": 329
+    },
+    {
+      "path": "xpu-smi/0000-03-00.0/stats.json",
+      "status": "collected",
+      "via": "xpu-smi stats -d 0000:03:00.0 -j",
+      "bytes": 5112,
+      "ms": 815
+    },
+    {
+      "path": "xpu-smi/0000-03-00.0/config.txt",
+      "status": "collected",
+      "via": "xpu-smi config -d 0000:03:00.0",
+      "bytes": 4654,
+      "ms": 321
+    },
+    {
+      "path": "xpu-smi/0000-03-00.0/health.json",
+      "status": "collected",
+      "via": "xpu-smi health -d 0000:03:00.0 -j",
+      "bytes": 813,
+      "ms": 612
+    },
+    {
+      "path": "xpu-smi/0000-03-00.0/ras-counters.csv",
+      "status": "skipped",
+      "via": "xpu-smi --query-gpu=ecc.errors.corrected.aggregate.total,ecc.errors.uncorrected.aggregate.total,ecc.errors.aggregate.total,ras.reset,ras.programming.errors,ras.driver.errors,ras.cache.errors.correctable,ras.cache.errors.uncorrectable,ras.non_compute.errors.correctable,ras.non_compute.errors.uncorrectable,ras.non_compute.errors.total,ras.memory.errors.correctable,ras.memory.errors.uncorrectable,ras.pcie.errors.correctable,ras.pcie.errors.uncorrectable,ras.soc_internal.errors.correctable,ras.soc_internal.errors.uncorrectable,ras.compute.errors.correctable,ras.compute.errors.uncorrectable,ras.fabric.errors.correctable,ras.fabric.errors.uncorrectable,ras.scale.errors.correctable,ras.scale.errors.uncorrectable --id=0000:03:00.0 --format=csv",
+      "reason": "not supported by this xpu-smi build",
+      "exit": 4,
+      "ms": 249
+    },
+    {
+      "path": "xpu-smi/raslog/",
+      "status": "collected",
+      "via": "xpu-smi raslog -f {outdir}/raslog.cper -j",
+      "exit": 1,
+      "bytes": 114,
+      "ms": 241
+    },
+    {
+      "path": "xpu-smi/0000-03-00.0/samples.csv",
+      "status": "collected",
+      "via": "xpu-smi dump -d 0000:03:00.0 --metrics POWER,TEMPERATURE,CLOCK,UTILIZATION,MEMORY --interval 1 --number 5",
+      "bytes": 2923,
+      "ms": 6580
+    }
+  ]
+}

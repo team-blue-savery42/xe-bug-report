@@ -1,0 +1,23 @@
+# Paths from oal/win/log_sources.cpp of the reference (head 012345678); replace with the
+# `xe-bug-report --list --full` output of the first Windows CI run.
+xpu-smi/version.txt
+system/os.txt
+system/systeminfo.txt
+system/env.txt
+system/id.txt
+system/wmi-video.txt
+system/wmi-display-drivers.txt
+devices/pnputil-devices.txt
+devices/pnputil-drivers.txt
+devices/display-class-registry.txt
+kernel/graphicsdrivers-registry.txt
+kernel/system-events.txt
+kernel/application-events.txt
+kernel/setupapi.dev.log
+dumps/listings.txt
+packages/driverquery.csv
+tools/dxdiag/
+kernel/
+xpu-smi/discovery.json
+xpu-smi/topology.txt
+xpu-smi/

@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: MIT
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# No RUSTFLAGS: it would override the static CRT setting in .cargo/config.toml. Clippy denies
+# warnings instead.
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo check --locked --all-targets --target x86_64-pc-windows-msvc
+      - run: cargo clippy --locked --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo install --locked cargo-vet cargo-audit cargo-deny
+      - run: scripts/ci-supply-chain.sh
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --locked --all-features
+      - run: cargo build --release --locked
+      - if: runner.os == 'Linux'
+        run: |
+          ldd target/release/xe-bug-report
+          ! ldd target/release/xe-bug-report | grep -Ev 'linux-vdso|libc\.so|libm\.so|libgcc_s|ld-linux'
+      # The C runtime is linked statically, so the binary imports only Windows system DLLs.
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' |
+              Select-Object -First 1
+          $imports = & $dumpbin /nologo /dependents target\release\xe-bug-report.exe
+          $imports
+          if ($imports -match '(?i)vcruntime|msvcp|ucrtbase|api-ms-win-crt') {
+              throw 'xe-bug-report.exe imports the C runtime'
+          }

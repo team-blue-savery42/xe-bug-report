@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+edition = "2024"
+max_width = 110
+use_small_heuristics = "Max"
