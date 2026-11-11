@@ -19,11 +19,11 @@ use crate::units::Bytes;
 pub(super) const EOF_GRACE: Option<Duration> = None;
 
 /// Puts the child in its own process group, restores `argv[0]` as typed (the path lookup is done
-/// by the caller) and resets SIGCHLD, which an ignoring parent would otherwise leak through exec.
-/// std already resets SIGPIPE and the signal mask in the child.
+/// by the caller), resets SIGCHLD, which an ignoring parent would otherwise leak through exec, and
+/// turns core dumps off. std already resets SIGPIPE and the signal mask in the child.
 pub(super) fn configure(cmd: &mut Command, program: &str) {
     cmd.process_group(0).arg0(program);
-    sys::unix::reset_sigchld_in_child(cmd);
+    sys::unix::prepare_child(cmd);
 }
 
 /// The child's process group, which has the child's pid because of `process_group(0)`.

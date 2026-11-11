@@ -26,6 +26,10 @@ use crate::units::Bytes;
 /// What the RAS counter query prints when this xpu-smi does not know the fields.
 pub const RAS_COUNTERS_UNSUPPORTED_MARKER: &str = "No valid metrics matched";
 
+/// What an xpu-smi that does not know a subcommand (an older build without `raslog` or
+/// `crashlog`) prints: "'raslog' is not a valid subcommand." followed by its usage text.
+pub const UNKNOWN_SUBCOMMAND_MARKER: &str = "is not a valid subcommand";
+
 /// The query fields of the RAS error counters: every `ras.*` and `ecc.errors.*` field of xpu-smi.
 /// A field this xpu-smi does not know makes the query print [`RAS_COUNTERS_UNSUPPORTED_MARKER`], and
 /// the source is then skipped as "not supported by this xpu-smi".
@@ -263,12 +267,15 @@ fn views_for(options: &SourceOptions, tools: &Tools, linux: bool) -> Vec<Source>
         }
     }
     if linux && !options.devices.is_empty() {
-        out.push(view(
-            "xpu-smi/raslog/",
-            &args(&["raslog", "-f", "{outdir}/raslog.cper", "-j"]),
-            Profile::Default,
-            "Hardware RAS error records (CPER) of all devices.",
-        ));
+        out.push(
+            view(
+                "xpu-smi/raslog/",
+                &args(&["raslog", "-f", "{outdir}/raslog.cper", "-j"]),
+                Profile::Default,
+                "Hardware RAS error records (CPER) of all devices.",
+            )
+            .unsupported_marker(UNKNOWN_SUBCOMMAND_MARKER),
+        );
     }
     // The crash log source exists only where iclg is installed, so a missing tool is not reported
     // as a missing privilege.
@@ -291,6 +298,7 @@ fn views_for(options: &SourceOptions, tools: &Tools, linux: bool) -> Vec<Source>
                 )
                 .gate(Gate::Root)
                 .timeout(CRASHLOG_TIMEOUT)
+                .unsupported_marker(UNKNOWN_SUBCOMMAND_MARKER)
                 .group(&device_group(device)),
             );
         }

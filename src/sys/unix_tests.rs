@@ -15,6 +15,15 @@ fn can_read_write_follows_the_permission_check() {
 }
 
 #[test]
+fn a_prepared_child_has_core_dumps_off() {
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c").arg("ulimit -c");
+    prepare_child(&mut cmd);
+    let output = cmd.output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "0");
+}
+
+#[test]
 fn euid_matches_proc_status() {
     let status = std::fs::read_to_string("/proc/self/status").unwrap();
     let line = status.lines().find(|l| l.starts_with("Uid:")).unwrap();

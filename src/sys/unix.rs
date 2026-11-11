@@ -69,10 +69,25 @@ pub fn kill_process_group(pgid: u32) {
     }
 }
 
-/// Makes `cmd` reset SIGCHLD to its default disposition in the child before exec, so a parent
-/// that ignores SIGCHLD does not leak that into tools that wait for their own children.
-pub fn reset_sigchld_in_child(cmd: &mut Command) {
+/// Prepares the child of `cmd` before exec: SIGCHLD back to its default disposition, so a parent
+/// that ignores it does not leak that into tools that wait for their own children, and core dumps
+/// off (`RLIMIT_CORE` 0), so a crashing tool does not leave a `core` file in the user's directory.
+pub fn prepare_child(cmd: &mut Command) {
     set_sigchld_in_child(cmd, libc::SIG_DFL);
+    disable_core_dumps_in_child(cmd);
+}
+
+fn disable_core_dumps_in_child(cmd: &mut Command) {
+    // SAFETY: the closure runs between fork and exec, so it may only call async-signal-safe
+    // functions; `setrlimit` is one (a single system call), it takes a pointer to a stack-local
+    // struct, allocates nothing and takes no locks. A failure is ignored: the limit is a courtesy.
+    unsafe {
+        cmd.pre_exec(|| {
+            let none = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+            libc::setrlimit(libc::RLIMIT_CORE, &none);
+            Ok(())
+        });
+    }
 }
 
 /// Makes `cmd` ignore SIGCHLD in the child (the disposition survives exec). Test support: it lets a

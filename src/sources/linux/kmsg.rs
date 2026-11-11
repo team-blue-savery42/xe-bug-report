@@ -229,7 +229,12 @@ pub fn kernel_log_with(
         } else {
             " (may include earlier boots)"
         };
-        let mut out = collected(rel_path, kern.data, format!("{KERN_LOG_PATH}{note}"));
+        let mut data = kern.data;
+        if kern.truncated {
+            // A tail read starts mid-line; a split host name would escape the whole-token rule.
+            crate::bundle::collect::drop_partial_line(&mut data, Keep::Tail);
+        }
+        let mut out = collected(rel_path, data, format!("{KERN_LOG_PATH}{note}"));
         if kern.truncated {
             out.status = Status::Truncated;
             out.reason = "tail only".to_owned();
