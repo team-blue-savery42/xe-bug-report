@@ -101,8 +101,21 @@ fn environment_filter_and_sort() {
 #[test]
 fn wanted_names() {
     for n in [
+        "NEOReadDebugKeys",
+        "neoreaddebugkeys",
         "PATH",
-        "path",
+        "Path",
+        "MESA_LOADER_DRIVER_OVERRIDE",
+        "ANV_DEBUG",
+        "VK_DRIVER_FILES",
+        "VK_LOADER_DEBUG",
+        "DRI_PRIME",
+        "LIBGL_ALWAYS_SOFTWARE",
+        "EGL_PLATFORM",
+        "GALLIUM_DRIVER",
+        "MFX_IMPL",
+        "ONEVPL_SEARCH_PATH",
+        "OPENCL_VENDOR_PATH",
         "lc_all",
         "CONTAINER",
         "PROCESSOR_ARCHITECTURE",
@@ -113,9 +126,89 @@ fn wanted_names() {
     ] {
         assert!(wanted_environment_name(n), "{n}");
     }
-    for n in ["PROCESSOR_IDENTIFIER", "PATHEXT", "USER", "URL", "TEMP", "LANGUAGE", ""] {
+    for n in ["PROCESSOR_IDENTIFIER", "PATHEXT", "USER", "URL", "TEMP", "LANGUAGE", "NEO", ""] {
         assert!(!wanted_environment_name(n), "{n}");
     }
+}
+
+fn vars(pairs: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
+    pairs.iter().map(|(n, v)| (os(n), os(v))).collect()
+}
+
+#[test]
+fn debug_keys_by_plain_name_are_recorded_only_while_the_switch_is_on() {
+    let pairs = [
+        ("NEOReadDebugKeys", "1"),
+        ("PrintDebugMessages", "1"),
+        ("EnableDirectSubmission", "0"),
+        ("ForceCsrFlushing", "1"),
+        ("USERNAME", "jdoe"),
+        ("USERPROFILE", "C:\\Users\\jdoe"),
+        ("GITHUB_TOKEN", "t"),
+        ("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE"),
+        ("AZURE_STORAGE_CONNECTION_STRING", "AccountKey=abc"),
+        ("DATABASE_URL", "postgres://u:p@db.example.com/x"),
+        ("HTTPS_PROXY", "http://proxy.example.com:8080"),
+        ("USERDNSDOMAIN", "CORP.EXAMPLE.COM"),
+        ("CLIENTNAME", "LAPTOP-7"),
+        ("SENTRY_DSN", "https://abc@example.com/1"),
+        ("=C:", "C:\\dir"),
+    ];
+    assert_eq!(
+        environment_text(vars(&pairs)),
+        "EnableDirectSubmission=0\nForceCsrFlushing=1\nNEOReadDebugKeys=1\nPrintDebugMessages=1\n"
+    );
+    let off: Vec<(&str, &str)> =
+        pairs.iter().map(|&(n, v)| if n == "NEOReadDebugKeys" { (n, "0") } else { (n, v) }).collect();
+    assert_eq!(environment_text(vars(&off)), "NEOReadDebugKeys=0\n");
+    let unset: Vec<(&str, &str)> = pairs.iter().copied().filter(|(n, _)| *n != "NEOReadDebugKeys").collect();
+    assert_eq!(environment_text(vars(&unset)), "");
+}
+
+#[test]
+fn the_debug_key_list_is_clean_and_matches_prefixed_names() {
+    assert!(DEBUG_KEY_NAMES.lines().count() > 100);
+    assert!(
+        DEBUG_KEY_NAMES.lines().all(|l| !l.is_empty() && l == l.trim() && !l.contains(char::is_whitespace))
+    );
+    assert!(DEBUG_KEY_NAMES.lines().any(|l| l == "PrintDebugMessages"));
+    for name in [
+        "PrintDebugMessages",
+        "printdebugmessages",
+        "NEO_PrintDebugMessages",
+        "neo_ocl_PrintDebugMessages",
+        "NEO_L0_PrintDebugMessages",
+    ] {
+        assert!(is_debug_key_name(name), "{name}");
+    }
+    for name in [
+        "",
+        "NEO_",
+        "NEO_OCL_",
+        "AWS_ACCESS_KEY_ID",
+        "DATABASE_URL",
+        "HTTPS_PROXY",
+        "CLIENTNAME",
+        "PrintDebugMessagesX",
+    ] {
+        assert!(!is_debug_key_name(name), "{name}");
+    }
+}
+
+#[test]
+fn debug_key_values_are_cut() {
+    let long = "x".repeat(2000);
+    let text = environment_text(vars(&[("NEOReadDebugKeys", "1"), ("AUBDumpCaptureDirPath", &long)]));
+    let line = text.lines().find(|l| l.starts_with("AUBDumpCaptureDirPath=")).unwrap();
+    assert_eq!(line.len(), "AUBDumpCaptureDirPath=".len() + 512);
+}
+
+#[test]
+fn the_debug_key_switch_is_found_in_any_letter_case_and_empty_means_off() {
+    let on = environment_text(vars(&[("neoreaddebugkeys", "1"), ("DumpKernels", "1")]));
+    assert_eq!(on, "DumpKernels=1\nneoreaddebugkeys=1\n");
+    let empty = environment_text(vars(&[("NEOReadDebugKeys", " "), ("DumpKernels", "1")]));
+    assert_eq!(empty, "NEOReadDebugKeys= \n");
 }
 
 #[test]
@@ -136,6 +229,24 @@ fn directories_have_fallbacks() {
         program_data_from(None, &PathBuf::from("\\\\server\\share\\Windows")),
         PathBuf::from("C:\\ProgramData")
     );
+}
+
+#[test]
+fn local_app_data_has_a_fallback() {
+    assert_eq!(
+        local_app_data_from(Some(os("D:\\L")), Some(os("C:\\Users\\me"))),
+        Some(PathBuf::from("D:\\L"))
+    );
+    assert_eq!(
+        local_app_data_from(Some(os("")), Some(os("C:\\Users\\me"))),
+        Some(PathBuf::from("C:\\Users\\me").join("AppData").join("Local"))
+    );
+    assert_eq!(
+        local_app_data_from(None, Some(os("C:\\Users\\me"))),
+        Some(PathBuf::from("C:\\Users\\me").join("AppData").join("Local"))
+    );
+    assert_eq!(local_app_data_from(None, None), None);
+    assert_eq!(local_app_data_from(Some(os("")), Some(os(""))), None);
 }
 
 const REG: &str = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\r\n    \

@@ -20,8 +20,15 @@ pub const MAX_LISTING_ENTRIES: usize = 20_000;
 /// The path of the listing in the bundle.
 pub const REL_PATH: &str = "dumps/listings.txt";
 
-/// Crash reports of interest are folders named after the faulting module or the event type.
-pub const WER_NAME_PARTS: &[&str] = &["igd", "ze_", "xpu", "livekernelevent"];
+/// The path of the per-user crash dump listing in the bundle.
+pub const USER_DUMPS_REL_PATH: &str = "dumps/user-crashdumps.txt";
+/// The most entries listed from the per-user crash dump folder.
+pub const MAX_USER_DUMP_ENTRIES: usize = 2_000;
+
+/// Crash reports of interest are folders named after the faulting module or the event type:
+/// Intel user-mode driver modules, and the `Kernel_<code>_<hash>` folders of kernel reports
+/// (for example `Kernel_141_...` for a GPU watchdog timeout).
+pub const WER_NAME_PARTS: &[&str] = &["igd", "igc", "igfx", "ze_", "xpu", "livekernelevent", "kernel_"];
 
 /// ERROR_ACCESS_DENIED.
 const ERROR_ACCESS_DENIED: i32 = 5;
@@ -44,6 +51,12 @@ pub fn roots(windows_dir: &Path, program_data: &Path) -> Vec<Root> {
         Root { path: wer.join("ReportArchive"), filter: WER_NAME_PARTS },
         Root { path: wer.join("ReportQueue"), filter: WER_NAME_PARTS },
     ]
+}
+
+/// The per-user crash dump folder that Windows Error Reporting writes local dumps to by default,
+/// `%LOCALAPPDATA%\CrashDumps`; the files are listed, never copied.
+pub fn user_dump_roots(local_app_data: &Path) -> Vec<Root> {
+    vec![Root { path: local_app_data.join("CrashDumps"), filter: &[] }]
 }
 
 /// The text and counters of a listing in progress.
@@ -180,14 +193,33 @@ fn list_directory(dir: &Path, relative: &str, depth: usize, filter: &[&str], sta
 /// Lists every root into one artifact, `dumps/listings.txt`: Collected, or Truncated when some
 /// directory was denied or the entry limit was reached.
 pub fn list_roots(roots: &[Root]) -> Produced {
-    list_roots_limited(roots, MAX_LISTING_ENTRIES)
+    list_roots_limited(REL_PATH, roots, MAX_LISTING_ENTRIES)
 }
 
-/// [`list_roots`] with an explicit entry limit.
-fn list_roots_limited(roots: &[Root], max_entries: usize) -> Produced {
+/// [`list_roots`] for the per-user crash dump folder, as [`USER_DUMPS_REL_PATH`].
+pub fn list_user_dumps(roots: &[Root]) -> Produced {
+    list_roots_limited(USER_DUMPS_REL_PATH, roots, MAX_USER_DUMP_ENTRIES)
+}
+
+/// The per-user crash dump listing for the invoking user's local application data directory;
+/// Skipped when that directory is not known.
+pub fn produce_user_dumps(local_app_data: Option<&Path>) -> Produced {
+    match local_app_data {
+        Some(dir) => list_user_dumps(&user_dump_roots(dir)),
+        None => Produced {
+            rel_path: USER_DUMPS_REL_PATH.to_owned(),
+            status: Status::Skipped,
+            reason: "the local application data directory is not known".to_owned(),
+            ..Produced::default()
+        },
+    }
+}
+
+/// [`list_roots`] with an explicit bundle path and entry limit.
+fn list_roots_limited(rel_path: &str, roots: &[Root], max_entries: usize) -> Produced {
     let mut state = ListingState::new(max_entries);
     for root in roots {
-        state.text.push_str(&format!("== {} ==\n", root.path.to_string_lossy()));
+        let _ = writeln!(state.text, "== {} ==", root.path.to_string_lossy());
         if !state.limit_hit {
             list_directory(&root.path, "", 0, root.filter, &mut state);
         }
@@ -210,7 +242,7 @@ fn list_roots_limited(roots: &[Root], max_entries: usize) -> Produced {
         reasons.push(format!("listing stopped after {max_entries} entries"));
     }
     Produced {
-        rel_path: REL_PATH.to_owned(),
+        rel_path: rel_path.to_owned(),
         status: if reasons.is_empty() { Status::Collected } else { Status::Truncated },
         data: state.text.into_bytes(),
         reason: reasons.join("; "),

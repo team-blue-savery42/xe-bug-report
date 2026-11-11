@@ -13,13 +13,55 @@ use crate::procio::{ChildOutcome, run_child};
 use crate::redact::Context;
 use crate::units::Bytes;
 
-/// Same classes of variable as the Linux table, minus the loader variables.
+/// Same classes of variable as the Linux table, minus the loader variables: the compute and
+/// media runtimes, the shader compiler, and the Mesa, Vulkan, OpenGL and OpenCL loaders.
 const ENV_PREFIXES: &[&str] = &[
-    "NEO_", "ZE_", "ZET_", "ZES_", "ZEL_", "ZEX_", "ONEAPI_", "SYCL_", "UR_", "IGC_", "OCL_", "XPU_SMI_",
-    "XPUM_", "LIBVA_", "INTEL_",
+    "NEO_",
+    "ZE_",
+    "ZET_",
+    "ZES_",
+    "ZEL_",
+    "ZEX_",
+    "ONEAPI_",
+    "SYCL_",
+    "UR_",
+    "IGC_",
+    "OCL_",
+    "XPU_SMI_",
+    "XPUM_",
+    "LIBVA_",
+    "INTEL_",
+    "MESA_",
+    "ANV_",
+    "HASVK_",
+    "VK_",
+    "LIBGL_",
+    "EGL_",
+    "GALLIUM_",
+    "DRI_PRIME",
+    "MFX_",
+    "VPL_",
+    "ONEVPL_",
+    "OPENCL_",
+    "CL_",
 ];
-/// Variables recorded by exact name (compared in upper case).
-const ENV_EXACT: &[&str] = &["PATH", "LANG", "LC_ALL", "CONTAINER", "PROCESSOR_ARCHITECTURE"];
+/// Variables recorded by exact name (compared in upper case). `NEOReadDebugKeys` does not start
+/// with `NEO_`; it switches the compute runtime's debug keys on. `PATH` decides which loader
+/// libraries (`OpenCL.dll`, `vulkan-1.dll`, `ze_loader.dll`) a process finds first.
+const ENV_EXACT: &[&str] =
+    &["NEOREADDEBUGKEYS", "PATH", "LANG", "LC_ALL", "CONTAINER", "PROCESSOR_ARCHITECTURE"];
+
+/// The variable that makes the compute runtime read its debug keys.
+const DEBUG_KEYS_SWITCH: &str = "NEOREADDEBUGKEYS";
+/// The compute runtime's debug key names, one per line: a snapshot of the runtime's key list.
+/// Keys are read from variables with their plain names (`PrintDebugMessages`,
+/// `EnableDirectSubmission`, ...), or with a `NEO_OCL_`, `NEO_L0_` or `NEO_` prefix. Keys added
+/// by a newer runtime are not recorded.
+const DEBUG_KEY_NAMES: &str = include_str!("debug_keys.txt");
+/// The prefixes the compute runtime accepts before a debug key name, longest first.
+const DEBUG_KEY_PREFIXES: &[&str] = &["NEO_OCL_", "NEO_L0_", "NEO_"];
+/// Debug key values are cut at this many characters.
+const MAX_DEBUG_VALUE_CHARS: usize = 512;
 
 /// Account names of the built-in service accounts; they occur in ordinary log text and would be
 /// rewritten everywhere, so they are never treated as a user name.
@@ -110,20 +152,56 @@ pub fn wanted_environment_name(name: &str) -> bool {
     ENV_EXACT.contains(&upper.as_str()) || ENV_PREFIXES.iter().any(|p| upper.starts_with(p))
 }
 
+/// Whether `name` is a compute runtime debug key, bare or with a `NEO_OCL_`, `NEO_L0_` or `NEO_`
+/// prefix (any letter case).
+pub fn is_debug_key_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    let bare = DEBUG_KEY_PREFIXES.iter().find_map(|prefix| upper.strip_prefix(prefix)).unwrap_or(&upper);
+    !bare.is_empty() && DEBUG_KEY_NAMES.lines().any(|key| key.eq_ignore_ascii_case(bare))
+}
+
+/// Whether a variable is recorded while the debug-key switch is on: the switch itself and the
+/// debug keys. Nothing else is, so unrelated variables with secrets or names never appear.
+fn wanted_while_debug_keys_on(name: &str) -> bool {
+    name.eq_ignore_ascii_case(DEBUG_KEYS_SWITCH) || is_debug_key_name(name)
+}
+
+/// Whether the debug-key switch is set to something other than empty or `0`.
+fn debug_keys_switch_on(vars: &[(String, OsString)]) -> bool {
+    vars.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case(DEBUG_KEYS_SWITCH) && {
+            let value = value.to_string_lossy();
+            let value = value.trim();
+            !value.is_empty() && value != "0"
+        }
+    })
+}
+
 /// Sorted `NAME=value` lines, one per wanted variable. Entries without a name, such as the
-/// per-drive `=C:` working directories, are not variables.
+/// per-drive `=C:` working directories, are not variables. While `NEOReadDebugKeys` is set to
+/// something other than `0`, the compute runtime's debug keys are wanted too, each value cut at
+/// 512 characters.
 pub fn environment_text<I>(vars: I) -> String
 where
     I: IntoIterator<Item = (OsString, OsString)>,
 {
-    let mut lines: Vec<String> = vars
+    let vars: Vec<(String, OsString)> = vars
         .into_iter()
+        .map(|(name, value)| (name.to_string_lossy().into_owned(), value))
+        .filter(|(name, _)| !name.is_empty() && !name.starts_with('='))
+        .collect();
+    let debug_keys = debug_keys_switch_on(&vars);
+    let mut lines: Vec<String> = vars
+        .iter()
         .filter_map(|(name, value)| {
-            let name = name.to_string_lossy().into_owned();
-            if name.is_empty() || name.starts_with('=') || !wanted_environment_name(&name) {
-                return None;
+            let value = value.to_string_lossy();
+            if wanted_environment_name(name) {
+                Some(format!("{name}={value}"))
+            } else if debug_keys && wanted_while_debug_keys_on(name) {
+                Some(format!("{name}={}", value.chars().take(MAX_DEBUG_VALUE_CHARS).collect::<String>()))
+            } else {
+                None
             }
-            Some(format!("{name}={}", value.to_string_lossy()))
         })
         .collect();
     lines.sort();
@@ -167,6 +245,23 @@ pub fn program_data_from(program_data: Option<OsString>, windows_dir: &std::path
         _ => "C:".to_owned(),
     };
     PathBuf::from(format!("{drive}\\ProgramData"))
+}
+
+/// The per-user local application data directory: `%LOCALAPPDATA%`, else `AppData\Local` below
+/// `%USERPROFILE%`; None when neither is set.
+pub fn local_app_data_from(
+    local_app_data: Option<OsString>,
+    user_profile: Option<OsString>,
+) -> Option<PathBuf> {
+    if let Some(dir) = local_app_data.filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    user_profile.filter(|v| !v.is_empty()).map(|p| PathBuf::from(p).join("AppData").join("Local"))
+}
+
+/// The local application data directory of the invoking user.
+pub fn local_app_data_dir() -> Option<PathBuf> {
+    local_app_data_from(std::env::var_os("LOCALAPPDATA"), std::env::var_os("USERPROFILE"))
 }
 
 /// The Windows directory of this machine.

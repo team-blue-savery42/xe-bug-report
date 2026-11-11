@@ -18,6 +18,7 @@ fn system_query_text() {
         "/q:*[System[(Provider[@Name='Display'] or Provider[@Name='Microsoft-Windows-DxgKrnl'] or \
 Provider[@Name='Microsoft-Windows-Kernel-PnP'] or Provider[@Name='Microsoft-Windows-WHEA-Logger'] or \
 Provider[@Name='Microsoft-Windows-Kernel-Power'] or Provider[@Name='BugCheck'] or \
+Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'] or Provider[@Name='Microsoft-Windows-Kernel-LiveDump'] or \
 Provider[@Name='igfx'] or Provider[@Name='igfxn']) and TimeCreated[timediff(@SystemTime) <= 1000]]]"
     );
 }
@@ -43,4 +44,23 @@ fn brackets_balance() {
         assert_eq!(q.matches('(').count(), q.matches(')').count(), "{q}");
         assert!(q.starts_with("/q:"));
     }
+}
+
+#[test]
+fn channel_script_uses_the_window_and_no_double_quotes() {
+    let script = graphics_channels_script(86_400_000);
+    assert!(script.starts_with("$start = (Get-Date).AddMilliseconds(-86400000); "), "{script}");
+    assert!(script.contains("-match 'dxgkrnl|dwm|livedump|display'"), "{script}");
+    assert!(script.contains("-MaxEvents 200"), "{script}");
+    assert!(script.contains("-replace '\\s+', ' '"), "{script}");
+    assert!(!script.contains('"'), "{script}");
+    assert!(!script.ends_with('\\'));
+    assert_eq!(script.matches('{').count(), script.matches('}').count(), "{script}");
+    assert_eq!(script.matches('(').count(), script.matches(')').count(), "{script}");
+}
+
+#[test]
+fn channel_script_window_is_bounded() {
+    assert!(graphics_channels_script(u64::MAX).contains("AddMilliseconds(-315360000000)"));
+    assert!(graphics_channels_script(0).contains("AddMilliseconds(-0)"));
 }

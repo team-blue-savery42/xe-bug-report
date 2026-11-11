@@ -5,6 +5,8 @@ pub mod events;
 pub mod gpus;
 pub mod host;
 pub mod listings;
+pub mod scripts;
+pub mod wer;
 
 use std::path::Path;
 use std::time::Duration;
@@ -36,18 +38,29 @@ fn powershell(
     command(rel_path, &refs, profile, timeout, why)
 }
 
-/// The Windows platform rows, in reference order, before profile filtering. Time-windowed event
+/// Whether this process is elevated; the availability check of the rows that need it.
+fn elevated() -> bool {
+    current_privilege() == Privilege::Privileged
+}
+
+/// The Windows platform rows, in bundle order, before profile filtering. Time-windowed event
 /// queries use `options.since` (72 hours by default).
 pub fn table(options: &SourceOptions) -> Vec<Source> {
     let windows_dir = host::windows_dir();
     let program_data = host::program_data_dir(&windows_dir);
-    table_for(options, &windows_dir, &program_data)
+    let local_app_data = host::local_app_data_dir();
+    table_for(options, &windows_dir, &program_data, local_app_data.as_deref())
 }
 
-/// [`table`] with the Windows and ProgramData directories given.
-// One push per row keeps the table readable and in reference order.
+/// [`table`] with the Windows, ProgramData and local application data directories given.
+// One push per row keeps the table readable and in bundle order.
 #[allow(clippy::vec_init_then_push)]
-fn table_for(options: &SourceOptions, windows_dir: &Path, program_data: &Path) -> Vec<Source> {
+fn table_for(
+    options: &SourceOptions,
+    windows_dir: &Path,
+    program_data: &Path,
+    local_app_data: Option<&Path>,
+) -> Vec<Source> {
     let window_ms = events::window_ms(options.since);
     let mut sources = Vec::new();
 
@@ -94,6 +107,70 @@ DeviceName,DriverVersion,DriverDate,InfName,DeviceID,Manufacturer,IsSigned,Signe
         TIMEOUT_60S,
         "installed display driver packages and their signatures",
     ));
+    sources.push(powershell(
+        "system/monitors.txt",
+        scripts::MONITORS,
+        Profile::Default,
+        TIMEOUT_30S,
+        "connected monitors: make, model, year and connector type, without serial numbers",
+    ));
+    sources.push(command(
+        "system/power-sleep-states.txt",
+        &["powercfg", "/a"],
+        Profile::Default,
+        TIMEOUT_30S,
+        "available sleep states and why others are unavailable",
+    ));
+    sources.push(command(
+        "system/power-scheme.txt",
+        &["powercfg", "/getactivescheme"],
+        Profile::Default,
+        TIMEOUT_30S,
+        "the active power scheme",
+    ));
+    sources.push(command(
+        "system/power-pcie.txt",
+        &["powercfg", "/query", "SCHEME_CURRENT", "SUB_PCIEXPRESS"],
+        Profile::Default,
+        TIMEOUT_30S,
+        "PCI Express link state power management settings",
+    ));
+    sources.push(
+        command(
+            "system/power-requests.txt",
+            &["powercfg", "/requests"],
+            Profile::Default,
+            TIMEOUT_30S,
+            "what is keeping the display or system awake",
+        )
+        .gate(Gate::Elevated)
+        .available(elevated),
+    );
+    sources.push(powershell(
+        "system/gpu-counters.txt",
+        scripts::GPU_COUNTERS,
+        Profile::Default,
+        TIMEOUT_60S,
+        "one sample of GPU engine utilisation and memory use per process",
+    ));
+    sources.push(powershell(
+        "system/isolation.txt",
+        scripts::ISOLATION,
+        Profile::Default,
+        TIMEOUT_30S,
+        "virtualization-based security, code integrity and hypervisor state",
+    ));
+    sources.push(
+        command(
+            "system/bcdedit.txt",
+            &["bcdedit", "/enum", "{current}"],
+            Profile::Default,
+            TIMEOUT_30S,
+            "boot settings such as test signing and debug mode",
+        )
+        .gate(Gate::Elevated)
+        .available(elevated),
+    );
 
     // devices/
     sources.push(command(
@@ -125,6 +202,50 @@ DeviceName,DriverVersion,DriverDate,InfName,DeviceID,Manufacturer,IsSigned,Signe
         )
         .cap(Bytes::mib(8)),
     );
+    sources.push(
+        command(
+            "devices/directx-registry.txt",
+            &["reg", "query", "HKLM\\SOFTWARE\\Microsoft\\DirectX", "/s"],
+            Profile::Default,
+            TIMEOUT_30S,
+            "DirectX adapters as DXGI sees them: driver version, memory, ids",
+        )
+        .cap(Bytes::mib(2)),
+    );
+    sources.push(command(
+        "devices/gpu-preference-registry.txt",
+        &["reg", "query", "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences"],
+        Profile::Default,
+        crate::bundle::source::DEFAULT_TIMEOUT,
+        "per-application GPU choice on systems with more than one GPU",
+    ));
+    sources.push(
+        command(
+            "devices/intel-igfx-registry-machine.txt",
+            &["reg", "query", "HKLM\\SOFTWARE\\Intel\\IGFX", "/s"],
+            Profile::Default,
+            crate::bundle::source::DEFAULT_TIMEOUT,
+            "compute-runtime debug keys set in the registry (read before the environment)",
+        )
+        .cap(Bytes::mib(1)),
+    );
+    sources.push(
+        command(
+            "devices/intel-igfx-registry-user.txt",
+            &["reg", "query", "HKCU\\Software\\Intel\\IGFX", "/s"],
+            Profile::Default,
+            crate::bundle::source::DEFAULT_TIMEOUT,
+            "compute-runtime debug keys set in the registry (read before the environment)",
+        )
+        .cap(Bytes::mib(1)),
+    );
+    sources.push(powershell(
+        "devices/khronos-icd.txt",
+        scripts::KHRONOS_ICDS,
+        Profile::Default,
+        TIMEOUT_30S,
+        "OpenCL and Vulkan drivers and layers the loaders find, with library versions",
+    ));
 
     // kernel/
     sources.push(command(
@@ -133,6 +254,20 @@ DeviceName,DriverVersion,DriverDate,InfName,DeviceID,Manufacturer,IsSigned,Signe
         Profile::Minimal,
         crate::bundle::source::DEFAULT_TIMEOUT,
         "graphics kernel settings (TDR, scheduler)",
+    ));
+    sources.push(command(
+        "kernel/crashcontrol-registry.txt",
+        &["reg", "query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\CrashControl", "/s"],
+        Profile::Minimal,
+        crate::bundle::source::DEFAULT_TIMEOUT,
+        "whether a crash or watchdog dump can be written at all",
+    ));
+    sources.push(command(
+        "kernel/localdumps-registry.txt",
+        &["reg", "query", "HKLM\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LocalDumps", "/s"],
+        Profile::Default,
+        crate::bundle::source::DEFAULT_TIMEOUT,
+        "where and how user-mode crash dumps are written",
     ));
     sources.push(command(
         "kernel/system-events.txt",
@@ -164,6 +299,23 @@ DeviceName,DriverVersion,DriverDate,InfName,DeviceID,Manufacturer,IsSigned,Signe
         TIMEOUT_60S,
         "application crash and error-reporting events",
     ));
+    sources.push(powershell(
+        "kernel/graphics-channel-events.txt",
+        &events::graphics_channels_script(window_ms),
+        Profile::Default,
+        TIMEOUT_60S,
+        "events of the DxgKrnl, window manager and live dump channels found on this machine",
+    ));
+    sources.push(
+        command(
+            "kernel/etw-providers.txt",
+            &["logman", "query", "providers"],
+            Profile::Default,
+            TIMEOUT_30S,
+            "registered tracing providers of Intel graphics, DxgKrnl and display components",
+        )
+        .keep_lines(&["intel", "igfx", "dxgkrnl", "display"]),
+    );
     sources.push(
         command(
             "kernel/",
@@ -198,6 +350,24 @@ DeviceName,DriverVersion,DriverDate,InfName,DeviceID,Manufacturer,IsSigned,Signe
         )
         .gate(Gate::Elevated),
     );
+    let wer_dir = program_data.join("Microsoft").join("Windows").join("WER");
+    sources.push(
+        Source::builtin(
+            wer::REL_PATH,
+            Box::new(move |reader| vec![wer::produce(&wer_dir, reader)]),
+            Profile::Default,
+            "GPU hang and live kernel event report parameters (code, module, driver), without dumps",
+        )
+        .timeout(TIMEOUT_30S)
+        .gate(Gate::Elevated),
+    );
+    let local_app_data = local_app_data.map(Path::to_path_buf);
+    sources.push(Source::builtin(
+        listings::USER_DUMPS_REL_PATH,
+        Box::new(move |_reader| vec![listings::produce_user_dumps(local_app_data.as_deref())]),
+        Profile::Default,
+        "the invoking user's crash dump files, listed but not copied",
+    ));
 
     // packages/ and tools/
     sources.push(command(
@@ -206,6 +376,20 @@ DeviceName,DriverVersion,DriverDate,InfName,DeviceID,Manufacturer,IsSigned,Signe
         Profile::Default,
         TIMEOUT_30S,
         "all loaded drivers with versions and dates",
+    ));
+    sources.push(powershell(
+        "packages/umd-versions.txt",
+        scripts::UMD_VERSIONS,
+        Profile::Default,
+        TIMEOUT_30S,
+        "versions of the user-mode graphics, compute and media driver libraries",
+    ));
+    sources.push(powershell(
+        "packages/intel-software.txt",
+        scripts::INTEL_SOFTWARE,
+        Profile::Default,
+        TIMEOUT_60S,
+        "installed Intel graphics software and its version",
     ));
     sources.push(command(
         "tools/dxdiag/",

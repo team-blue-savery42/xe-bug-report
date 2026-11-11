@@ -119,7 +119,7 @@ fn entry_limit_truncates() {
     for i in 0..5 {
         fs::write(dir.path().join(format!("f{i}")), b"1").unwrap();
     }
-    let p = list_roots_limited(&[Root { path: dir.path().to_path_buf(), filter: &[] }], 3);
+    let p = list_roots_limited(REL_PATH, &[Root { path: dir.path().to_path_buf(), filter: &[] }], 3);
     assert_eq!(p.status, Status::Truncated);
     assert_eq!(p.reason, "listing stopped after 3 entries");
     let t = text(&p);
@@ -141,7 +141,8 @@ fn filtered_out_names_do_not_use_the_limit() {
     }
     fs::write(dir.path().join("xpu_1"), b"1").unwrap();
     fs::write(dir.path().join("igd_2"), b"1").unwrap();
-    let p = list_roots_limited(&[Root { path: dir.path().to_path_buf(), filter: WER_NAME_PARTS }], 3);
+    let p =
+        list_roots_limited(REL_PATH, &[Root { path: dir.path().to_path_buf(), filter: WER_NAME_PARTS }], 3);
     assert_eq!(p.status, Status::Collected);
     let t = text(&p);
     assert!(t.contains("igd_2") && t.contains("xpu_1"), "{t}");
@@ -159,4 +160,51 @@ fn name_matching() {
     assert!(name_matches("Kernel_IGD_1", WER_NAME_PARTS));
     assert!(name_matches("ZE_loader", WER_NAME_PARTS));
     assert!(!name_matches("AppCrash", WER_NAME_PARTS));
+}
+
+#[test]
+fn kernel_report_folders_match_without_a_module_name() {
+    // A GPU watchdog report folder carries the bugcheck code and a hash, not the driver module.
+    for name in [
+        "Kernel_141_0123456789abcdef0123456789abcdef01234567_00000000_cab_1a2b3c4d",
+        "kernel_117_89abcdef",
+        "Kernel_1a8_ffff",
+    ] {
+        assert!(name_matches(name, WER_NAME_PARTS), "{name}");
+    }
+    assert!(name_matches("AppCrash_igc64.dll_1", WER_NAME_PARTS));
+    assert!(!name_matches("AppCrash_notepad.exe_1", WER_NAME_PARTS));
+    assert!(!name_matches("NonCritical_7_1", WER_NAME_PARTS));
+}
+
+#[test]
+fn the_user_crash_dump_folder_is_listed_under_its_own_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let dumps = dir.path().join("CrashDumps");
+    fs::create_dir(&dumps).unwrap();
+    fs::write(dumps.join("app.exe.1234.dmp"), b"12345").unwrap();
+    let roots = user_dump_roots(dir.path());
+    assert_eq!(roots.len(), 1);
+    assert!(roots[0].filter.is_empty());
+    let p = list_user_dumps(&roots);
+    assert_eq!(p.rel_path, "dumps/user-crashdumps.txt");
+    assert_eq!(p.status, Status::Collected);
+    assert!(text(&p).contains("           5  app.exe.1234.dmp\n"), "{}", text(&p));
+}
+
+#[test]
+fn an_unknown_local_app_data_directory_skips_the_user_listing() {
+    let p = produce_user_dumps(None);
+    assert_eq!(p.rel_path, "dumps/user-crashdumps.txt");
+    assert_eq!(p.status, Status::Skipped);
+    assert!(p.data.is_empty());
+    assert!(!p.reason.is_empty());
+}
+
+#[test]
+fn a_missing_user_crash_dump_folder_is_not_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = list_user_dumps(&user_dump_roots(dir.path()));
+    assert_eq!(p.status, Status::Collected);
+    assert!(text(&p).contains("(not present)"));
 }

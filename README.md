@@ -86,6 +86,9 @@ Windows (all but `xpu-smi` ship with Windows):
 | `wevtutil` | Windows | `kernel/*-events.txt`, `kernel/System.evtx` |
 | `systeminfo` | Windows | `system/systeminfo.txt` |
 | `driverquery` | Windows | `packages/driverquery.csv` |
+| `powercfg` | Windows | `system/power-*.txt` |
+| `bcdedit` | Windows | `system/bcdedit.txt` |
+| `logman` | Windows | `kernel/etw-providers.txt` |
 | `whoami` | Windows | `system/id.txt` |
 | `dxdiag` | Windows | `tools/dxdiag/` (`--full`) |
 
@@ -93,6 +96,8 @@ Related Intel projects:
 
 - [Level Zero loader](https://github.com/oneapi-src/level-zero): needed by
   `xpu-smi`.
+- [Intel Graphics Compute Runtime](https://github.com/intel/compute-runtime): defines
+  the debug keys recorded in `system/env.txt`.
 - [igsc](https://github.com/intel/igsc): GPU firmware update tool; its location is
   recorded in `system/env.txt`.
 
@@ -420,7 +425,9 @@ kernel and event logs, device attributes and the `xpu-smi` output, all redacted 
 
 Never collected, with or without `--no-redact`:
 
-- Windows crash dumps: they are listed, not copied.
+- monitor serial numbers (`system/monitors.txt` on Windows leaves it out);
+- Windows crash dumps: they are listed, not copied;
+- the user-interface text, module lists, application paths and machine name of WER reports.
 
 Opt-in:
 
