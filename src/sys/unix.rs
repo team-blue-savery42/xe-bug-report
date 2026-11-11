@@ -15,10 +15,40 @@ pub const O_NOCTTY: i32 = libc::O_NOCTTY;
 /// `WouldBlock` instead of waiting for more data.
 pub const O_NONBLOCK: i32 = libc::O_NONBLOCK;
 
+/// `EPERM` (1): operation not permitted.
+pub const EPERM: i32 = libc::EPERM;
+/// `EACCES` (13): permission denied.
+pub const EACCES: i32 = libc::EACCES;
+/// `ENOENT` (2): no such file, or no such generic netlink family.
+pub const ENOENT: i32 = libc::ENOENT;
+/// `EIO` (5): input/output error.
+pub const EIO: i32 = libc::EIO;
+/// `EPROTONOSUPPORT`: the kernel has no netlink protocol.
+pub const EPROTONOSUPPORT: i32 = libc::EPROTONOSUPPORT;
+/// `EAFNOSUPPORT`: the kernel has no netlink address family.
+pub const EAFNOSUPPORT: i32 = libc::EAFNOSUPPORT;
+
 /// The effective user id.
 pub fn euid() -> u32 {
     // SAFETY: geteuid takes no arguments, cannot fail and touches no memory.
     unsafe { libc::geteuid() }
+}
+
+/// Whether the effective user may read and write `path`, by the kernel's own permission check
+/// (`faccessat(AT_FDCWD, path, R_OK | W_OK, AT_EACCESS)`: mode bits, ACLs and capabilities, without
+/// opening the node, so a device driver is never entered). False for a path with a NUL byte.
+pub fn can_read_write(path: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call; faccessat reads it
+    // and touches no other memory.
+    let rc = unsafe {
+        libc::faccessat(libc::AT_FDCWD, c_path.as_ptr(), libc::R_OK | libc::W_OK, libc::AT_EACCESS)
+    };
+    rc == 0
 }
 
 /// Sends SIGKILL to the process group `pgid` (`kill(-pgid, SIGKILL)`); errors are ignored.

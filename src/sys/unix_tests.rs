@@ -4,6 +4,17 @@
 use super::*;
 
 #[test]
+fn can_read_write_follows_the_permission_check() {
+    use std::path::Path;
+    assert!(can_read_write(Path::new("/dev/null")));
+    assert!(!can_read_write(Path::new("/nonexistent/node")));
+    assert!(!can_read_write(Path::new("/dev/nu\0ll")));
+    if euid() != 0 {
+        assert!(!can_read_write(Path::new("/proc/version")));
+    }
+}
+
+#[test]
 fn euid_matches_proc_status() {
     let status = std::fs::read_to_string("/proc/self/status").unwrap();
     let line = status.lines().find(|l| l.starts_with("Uid:")).unwrap();
