@@ -27,7 +27,10 @@ fn main() {
     println!("cargo:rustc-env=XE_BUG_REPORT_DESCRIBE={describe}");
     println!("cargo:rustc-env=XE_BUG_REPORT_COMMIT={commit}");
     println!("cargo:rustc-env=XE_BUG_REPORT_BUILT_EPOCH={built}");
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/index");
+    // A crates.io or release-tarball build has no .git; watching missing paths would rerun every build.
+    if std::path::Path::new(".git").exists() {
+        println!("cargo:rerun-if-changed=.git/HEAD");
+        println!("cargo:rerun-if-changed=.git/index");
+    }
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
 }

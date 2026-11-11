@@ -8,7 +8,10 @@ license = "MIT"
 description = "Standalone GPU diagnostic collector: writes a redacted zip bundle of logs, sysfs and tool output"
 repository = "https://github.com/team-blue-savery42/xe-bug-report"
 readme = "README.md"
-publish = false
+keywords = ["gpu", "intel", "diagnostics", "bug-report", "xpu-smi"]
+categories = ["command-line-utilities", "development-tools::debugging", "hardware-support"]
+# What goes into the crates.io package: the build inputs plus what `cargo test` reads.
+include = ["/src", "/tests", "/build.rs", "/README.md", "/LICENSE"]
 
 [lib]
 name = "xe_bug_report"

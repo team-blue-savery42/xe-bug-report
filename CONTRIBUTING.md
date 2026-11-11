@@ -10,6 +10,7 @@ cargo fmt --check
 cargo clippy --all-targets --locked -- -D warnings
 cargo clippy --all-targets --locked --target x86_64-pc-windows-msvc -- -D warnings
 cargo test --locked --all-features
+cargo package --locked
 scripts/ci-supply-chain.sh
 shellcheck scripts/*.sh
 ```

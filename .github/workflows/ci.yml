@@ -25,6 +25,8 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo check --locked --all-targets --target x86_64-pc-windows-msvc
       - run: cargo clippy --locked --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+      # The crate must stay publishable (`cargo install xe-bug-report`): this builds it as packaged.
+      - run: cargo package --locked
 
   supply-chain:
     runs-on: ubuntu-latest
