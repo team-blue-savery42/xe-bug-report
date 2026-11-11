@@ -4,28 +4,77 @@
 #![allow(unsafe_code)]
 
 use std::io;
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::time::Duration;
 
+/// `O_NOCTTY`: opening a terminal device must not make it the controlling terminal.
+pub const O_NOCTTY: i32 = libc::O_NOCTTY;
+
+/// `O_NONBLOCK`: reads of pipes, FIFOs and record devices such as `/dev/kmsg` fail with
+/// `WouldBlock` instead of waiting for more data.
+pub const O_NONBLOCK: i32 = libc::O_NONBLOCK;
+
 /// The effective user id.
 pub fn euid() -> u32 {
-    0
+    // SAFETY: geteuid takes no arguments, cannot fail and touches no memory.
+    unsafe { libc::geteuid() }
 }
 
 /// Sends SIGKILL to the process group `pgid` (`kill(-pgid, SIGKILL)`); errors are ignored.
+///
+/// A `pgid` of 0 or one that does not fit a positive `pid_t` is refused: `kill(-0, ..)` would
+/// signal the caller's own group.
 pub fn kill_process_group(pgid: u32) {
-    let _ = pgid;
+    let Ok(pgid) = libc::pid_t::try_from(pgid) else {
+        return;
+    };
+    if pgid <= 0 {
+        return;
+    }
+    // SAFETY: kill takes two integers and touches no memory; `-pgid` is negative and non-zero, so it
+    // names exactly one process group and never the caller's own group or "all processes".
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
+    }
 }
 
 /// Makes `cmd` reset SIGCHLD to its default disposition in the child before exec, so a parent
 /// that ignores SIGCHLD does not leak that into tools that wait for their own children.
 pub fn reset_sigchld_in_child(cmd: &mut Command) {
-    let _ = cmd;
+    set_sigchld_in_child(cmd, libc::SIG_DFL);
+}
+
+/// Makes `cmd` ignore SIGCHLD in the child (the disposition survives exec). Test support: it lets a
+/// test run a copy of the test binary as a process whose SIGCHLD is ignored, without changing the
+/// disposition of the multi-threaded test process itself.
+#[cfg(test)]
+pub(crate) fn ignore_sigchld_in_child(cmd: &mut Command) {
+    set_sigchld_in_child(cmd, libc::SIG_IGN);
+}
+
+fn set_sigchld_in_child(cmd: &mut Command, handler: libc::sighandler_t) {
+    // SAFETY: the closure runs between fork and exec, so it may only call async-signal-safe
+    // functions; it calls `libc::signal`, which is one, allocates nothing and takes no locks.
+    unsafe {
+        cmd.pre_exec(move || {
+            libc::signal(libc::SIGCHLD, handler);
+            Ok(())
+        });
+    }
 }
 
 /// `CLOCK_MONOTONIC` now, the clock `/dev/kmsg` timestamps use.
 pub fn monotonic_now() -> Duration {
-    Duration::ZERO
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: `ts` is a valid, writable timespec for the duration of the call.
+    let rc = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    if rc != 0 {
+        return Duration::ZERO;
+    }
+    let secs = u64::try_from(ts.tv_sec).unwrap_or(0);
+    let nanos = u32::try_from(ts.tv_nsec).unwrap_or(0);
+    Duration::new(secs, nanos)
 }
 
 /// A generic netlink socket (`AF_NETLINK`, `SOCK_RAW | SOCK_CLOEXEC`, `NETLINK_GENERIC`), closed on drop.
@@ -34,22 +83,158 @@ pub struct NetlinkSocket {
     fd: std::os::fd::OwnedFd,
 }
 
+#[cfg(target_os = "linux")]
 impl NetlinkSocket {
-    /// Opens the socket with `SO_RCVTIMEO` = `recv_timeout`.
+    /// Opens the socket with `SO_RCVTIMEO` = `recv_timeout` (at least one millisecond: a zero
+    /// timeout would mean "block forever").
+    pub fn open_generic(recv_timeout: Duration) -> io::Result<Self> {
+        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+
+        // SAFETY: socket takes three integers and returns a new descriptor or -1.
+        let raw = unsafe {
+            libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, libc::NETLINK_GENERIC)
+        };
+        if raw < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `raw` is a freshly created descriptor that nothing else owns.
+        let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+
+        // SAFETY: sockaddr_nl is plain data for which all-zero bytes is a valid value.
+        let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+        addr.nl_family = libc::AF_NETLINK as libc::sa_family_t;
+        addr.nl_pid = 0; // let the kernel choose the port id
+        addr.nl_groups = 0;
+        // SAFETY: `addr` is a valid sockaddr_nl and the length passed is its size.
+        let rc = unsafe {
+            libc::bind(
+                fd.as_raw_fd(),
+                (&raw const addr).cast::<libc::sockaddr>(),
+                std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+            )
+        };
+        if rc != 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let timeout = recv_timeout.max(Duration::from_millis(1));
+        let tv = libc::timeval {
+            tv_sec: libc::time_t::try_from(timeout.as_secs()).unwrap_or(libc::time_t::MAX),
+            tv_usec: timeout.subsec_micros() as libc::suseconds_t, // below 1_000_000: fits
+        };
+        // SAFETY: `tv` is a valid timeval and the length passed is its size.
+        let rc = unsafe {
+            libc::setsockopt(
+                fd.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_RCVTIMEO,
+                (&raw const tv).cast::<libc::c_void>(),
+                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+            )
+        };
+        if rc != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self { fd })
+    }
+
+    /// Sends one message to the kernel (port 0).
+    pub fn send(&self, msg: &[u8]) -> io::Result<()> {
+        use std::os::fd::AsRawFd;
+
+        // SAFETY: sockaddr_nl is plain data for which all-zero bytes is a valid value.
+        let mut dest: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+        dest.nl_family = libc::AF_NETLINK as libc::sa_family_t;
+        dest.nl_pid = 0; // the kernel
+        dest.nl_groups = 0;
+        loop {
+            // SAFETY: `msg` is valid for `msg.len()` bytes, `dest` is a valid sockaddr_nl and the
+            // length passed is its size; the descriptor is owned by `self` and open.
+            let sent = unsafe {
+                libc::sendto(
+                    self.fd.as_raw_fd(),
+                    msg.as_ptr().cast::<libc::c_void>(),
+                    msg.len(),
+                    0,
+                    (&raw const dest).cast::<libc::sockaddr>(),
+                    std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+                )
+            };
+            if sent < 0 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(err);
+            }
+            if sent as usize != msg.len() {
+                return Err(io::Error::new(io::ErrorKind::WriteZero, "short netlink send"));
+            }
+            return Ok(());
+        }
+    }
+
+    /// Receives one datagram into `buf`; `WouldBlock`/`TimedOut` when `SO_RCVTIMEO` expires.
+    ///
+    /// A datagram longer than `buf` is an `InvalidData` error instead of a silently cut message
+    /// (`MSG_TRUNC`). Netlink dumps can fill 16 KiB or more per datagram: pass a buffer of at
+    /// least 32 KiB.
+    pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
+        use std::os::fd::AsRawFd;
+
+        loop {
+            // SAFETY: `buf` is valid for writes of `buf.len()` bytes; the descriptor is owned by
+            // `self` and open. With MSG_TRUNC the kernel copies at most `buf.len()` bytes but
+            // returns the real datagram length.
+            let got = unsafe {
+                libc::recv(
+                    self.fd.as_raw_fd(),
+                    buf.as_mut_ptr().cast::<libc::c_void>(),
+                    buf.len(),
+                    libc::MSG_TRUNC,
+                )
+            };
+            if got < 0 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(err);
+            }
+            let got = got as usize;
+            if got > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "netlink datagram larger than the receive buffer",
+                ));
+            }
+            return Ok(got);
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+impl NetlinkSocket {
+    /// Netlink exists on Linux only; always `Unsupported` here.
     pub fn open_generic(recv_timeout: Duration) -> io::Result<Self> {
         let _ = recv_timeout;
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
-    /// Sends one message to the kernel (port 0).
+    /// Netlink exists on Linux only; always `Unsupported` here.
     pub fn send(&self, msg: &[u8]) -> io::Result<()> {
         let _ = (&self.fd, msg);
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
-    /// Receives one datagram into `buf`; `WouldBlock`/`TimedOut` when `SO_RCVTIMEO` expires.
+    /// Netlink exists on Linux only; always `Unsupported` here.
     pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
-        let _ = buf;
+        let _ = (&self.fd, buf);
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[path = "unix_tests.rs"]
+mod tests;
