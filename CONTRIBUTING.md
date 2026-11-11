@@ -11,7 +11,7 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo clippy --all-targets --locked --target x86_64-pc-windows-msvc -- -D warnings
 cargo test --locked --all-features
 scripts/ci-supply-chain.sh
-shellcheck scripts/ci-supply-chain.sh
+shellcheck scripts/*.sh
 ```
 
 ## Code
@@ -31,6 +31,18 @@ shellcheck scripts/ci-supply-chain.sh
 - One logical change per commit; each commit builds and passes the tests.
 - End with `Signed-off-by: Name <email>` (`git commit -s`).
 
+## Tests
+
+- Unit tests sit next to their module, inline or in `<module>_tests.rs` (`tests.rs` in a module
+  directory). They do not depend on a GPU, `xpu-smi`, root or a particular distribution.
+- `tests/bundle_linux.rs` and `tests/bundle_windows.rs` run the binary end to end and read the
+  archive with the independent zip reader in `tests/common/`.
+- A change to a source row, profile or gate updates `tests/golden/` in the same commit.
+- Windows code must pass `cargo clippy --target x86_64-pc-windows-msvc` on Linux; the Windows tests
+  run on the `windows-latest` CI runner.
+- The redaction timing test runs only in release builds:
+  `cargo test --release --locked redact -- --ignored`.
+
 ## Dependencies
 
 - Prefer the standard library. A new crate needs a reason, a small dependency graph, no C build
@@ -42,3 +54,8 @@ shellcheck scripts/ci-supply-chain.sh
   `cargo vet diff`.
 - Open item: the exemptions in `supply-chain/config.toml` still need audits.
 
+## Packaging
+
+- `scripts/package.sh` builds the release binary into `dist/`: a `.tar.gz` always, a `.deb` when
+  `dpkg-deb` exists, an `.rpm` when `rpmbuild` exists.
+- The `.deb` depends on `libc6 (>= <glibc the binary references>)` and `libgcc-s1`.

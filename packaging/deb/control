@@ -1,8 +1,17 @@
 Package: xe-bug-report
-Version: 0.1.0
+Version: @VERSION@
 Section: utils
 Priority: optional
 Architecture: @ARCH@
-Maintainer: xe-bug-report maintainers
+Depends: @LIBC6@, libgcc-s1
+Recommends: pciutils
+Suggests: xpu-smi
+Maintainer: xe-bug-report contributors <savery42@users.noreply.github.com>
+Homepage: https://github.com/team-blue-savery42/xe-bug-report
 Description: Standalone GPU diagnostic collector
- Writes a redacted zip bundle of kernel logs, sysfs, PCI state and xpu-smi output.
+ Writes one redacted zip bundle of kernel logs, sysfs and debugfs attributes,
+ PCI state, package lists and xpu-smi output, for bug reports. It does not link
+ Level Zero or any GPU library, so it still runs when the GPU runtime is
+ missing or the driver is wedged, and it records why a source could not be
+ collected. Host and user names, serial numbers and addresses are replaced by
+ default.

@@ -2,3 +2,4 @@
 /review/
 *.zip
 *.partial
+/dist/
