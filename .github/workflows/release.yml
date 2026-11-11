@@ -1,0 +1,167 @@
+# SPDX-License-Identifier: MIT
+# Publishes GitHub release v<version> with Debian, RHEL and Windows builds whenever the package
+# version in Cargo.toml changes on main. The full CI runs first; nothing is tagged unless it and
+# every build pass. Run it by hand (workflow_dispatch on main) to release the current version
+# when it has no tag yet, for example after a failed run.
+name: release
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          version() { sed -n 's/^version *= *"\([^"]*\)".*/\1/p' | head -n 1; }
+          new=$(version <Cargo.toml)
+          if ! printf '%s\n' "$new" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$'; then
+              echo "::error::cannot read a release version from Cargo.toml (got '$new')"
+              exit 1
+          fi
+          release=true
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::notice::releases are made from main only"
+              release=false
+          elif git ls-remote --exit-code --tags origin "refs/tags/v$new" >/dev/null; then
+              echo "::notice::v$new is already released"
+              release=false
+          elif [ "$EVENT" = push ]; then
+              # Only a version bump releases; a dependency edit does not. After a force push the
+              # previous tip is on no branch and cannot be read, so nothing is released then.
+              if ! git cat-file -e "$BEFORE:Cargo.toml" 2>/dev/null; then
+                  echo "::notice::cannot read Cargo.toml at $BEFORE (force push?); run the workflow by hand to release $new"
+                  release=false
+              elif [ "$(git show "$BEFORE:Cargo.toml" | version)" = "$new" ]; then
+                  echo "::notice::the version is still $new"
+                  release=false
+              fi
+          fi
+          echo "version=$new" >>"$GITHUB_OUTPUT"
+          echo "release=$release" >>"$GITHUB_OUTPUT"
+          echo "version $new, release: $release"
+
+  ci:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    uses: ./.github/workflows/ci.yml
+
+  linux:
+    needs: [version, ci]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Debian 12: the .deb records the newest glibc symbol it needs, so build on an older base.
+          - name: debian
+            image: debian:bookworm
+            setup: >-
+              apt-get update &&
+              apt-get install -y --no-install-recommends
+              ca-certificates curl git gcc libc6-dev dpkg-dev binutils
+            files: dist/*.deb
+          # RHEL 8 (glibc 2.28) also gives the portable tarball for other distributions.
+          - name: el8
+            image: almalinux:8
+            setup: dnf install -y git gcc rpm-build binutils tar gzip findutils
+            files: |
+              dist/*.rpm
+              dist/*.tar.gz
+          - name: el9
+            image: almalinux:9
+            setup: dnf install -y git gcc rpm-build binutils tar gzip findutils
+            files: dist/*.rpm
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      # git must exist before checkout, or checkout downloads a tree without history.
+      - run: ${{ matrix.setup }}
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+              sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+      - name: Tag locally so --version shows the release
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git tag "v$VERSION"
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >>"$GITHUB_ENV"
+      - run: rustup toolchain install
+      - run: scripts/package.sh
+      - run: target/release/xe-bug-report --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  windows:
+    needs: [version, ci]
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag locally so --version shows the release
+        shell: bash
+        run: |
+          git tag "v$VERSION"
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >>"$GITHUB_ENV"
+      - run: cargo build --release --locked
+      - run: target/release/xe-bug-report.exe --version
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "xe-bug-report-$env:VERSION-x86_64-pc-windows-msvc"
+          New-Item -ItemType Directory -Force -Path "stage/$name", dist | Out-Null
+          Copy-Item target/release/xe-bug-report.exe, LICENSE, README.md -Destination "stage/$name"
+          Compress-Archive -Path "stage/$name" -DestinationPath "dist/$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [version, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cd dist && sha256sum -- * | tee SHA256SUMS
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "v$VERSION" --generate-notes

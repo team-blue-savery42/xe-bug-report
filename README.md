@@ -33,6 +33,11 @@ This tool is created for my own benefit as a user of a B70 Pro card while workin
 
 ## Install
 
+Each version is published on the
+[releases page](https://github.com/team-blue-savery42/xe-bug-report/releases): a `.deb` for
+Debian and Ubuntu, `.rpm` packages for RHEL 8 and 9 (and their rebuilds), a portable Linux
+`.tar.gz` (glibc 2.28 or newer), a Windows `.zip` and `SHA256SUMS`.
+
 Build from source with Rust 1.99 or newer (`rust-toolchain.toml` pins 1.99.1, the toolchain CI uses):
 
 ```sh

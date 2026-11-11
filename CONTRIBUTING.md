@@ -59,3 +59,7 @@ shellcheck scripts/*.sh
 - `scripts/package.sh` builds the release binary into `dist/`: a `.tar.gz` always, a `.deb` when
   `dpkg-deb` exists, an `.rpm` when `rpmbuild` exists.
 - The `.deb` depends on `libc6 (>= <glibc the binary references>)` and `libgcc-s1`.
+
+## Releasing
+
+- A version bump in `Cargo.toml` on `main` builds the release packages.
