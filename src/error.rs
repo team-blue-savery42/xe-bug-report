@@ -9,8 +9,8 @@ pub enum Error {
     /// An argument was malformed or out of range; the text is the user-facing message.
     #[error("{0}")]
     InvalidArgument(String),
-    /// `--device` named an address that is not on this system.
-    #[error("device {0} not found")]
+    /// `--device` named an address that is not on this system; the text is the address.
+    #[error("No Intel GPU with PCI address {0} was found on this system")]
     UnknownDevice(String),
     /// Something is already at the output path.
     #[error("{} already exists", .0.display())]
@@ -28,3 +28,7 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
+
+#[cfg(test)]
+#[path = "error_tests.rs"]
+mod tests;
