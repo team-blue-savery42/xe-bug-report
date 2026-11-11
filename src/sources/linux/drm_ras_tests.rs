@@ -286,7 +286,7 @@ fn a_datagram_is_scanned_for_data_completion_and_errors() {
     // An error message too short to hold the code.
     assert_eq!(scan_datagram(&message(NLMSG_ERROR, 5, &[1, 2]), 5, true).end, ScanEnd::Malformed);
 
-    // Note: a dump that failed half way says so in the payload of NLMSG_DONE, and what it
+    // A dump that failed half way says so in the payload of NLMSG_DONE, and what it
     // delivered before is not a result.
     let failed =
         scan_datagram(&join(&[message(0x1c, 5, &node), message(NLMSG_DONE, 5, &err_payload(-5))]), 5, true);

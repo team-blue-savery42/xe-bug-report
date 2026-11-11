@@ -77,6 +77,13 @@ impl Guard {
         }
     }
 
+    /// Marks `group` abandoned without running anything: for a caller that has seen the group's
+    /// work miss its limit by other means (a child process killed at its time limit), so that the
+    /// later calls of the group fail fast instead of each waiting for the same stuck state.
+    pub fn open(&self, group: &str) {
+        self.groups().insert(group.to_owned());
+    }
+
     /// Whether `group` was abandoned.
     pub fn is_open(&self, group: &str) -> bool {
         self.groups().contains(group)

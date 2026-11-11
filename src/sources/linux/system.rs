@@ -3,9 +3,8 @@
 //! firmware, links) and the privilege facts of this process.
 //!
 //! Builtins read files only through the [`Reader`] they are given, so a hanging `/proc` or sysfs
-//! file costs one source. Directory listings and `stat` calls use `std::fs` directly, as the
-//! reference does; the collector runs every builtin on a guarded helper thread.
-#![forbid(unsafe_code)]
+//! file costs one source. Directory listings and `stat` calls use `std::fs` directly; the
+//! collector runs every builtin on a guarded helper thread.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -16,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::bundle::source::{Gate, Produced, ReadOutcome, ReadResult, Reader};
 use crate::bundle::summary::Privilege;
+use crate::procio::find_in_path;
 use crate::sys::unix::{can_read_write, euid};
 use crate::units::Bytes;
 
@@ -221,12 +221,24 @@ pub fn uname_builtin(reader: &dyn Reader, rel_path: &str) -> Vec<Produced> {
     vec![collected(rel_path, text, "")]
 }
 
-/// The environment variables that change GPU runtime behaviour, as sorted `KEY=value` lines.
+/// The tools whose location on PATH is recorded in `system/env.txt` instead of the whole PATH.
+const ENV_TOOLS: &[&str] =
+    &["xpu-smi", "clinfo", "vainfo", "vulkaninfo", "eglinfo", "intel_gpu_top", "iclg", "igsc", "lspci"];
+
+/// The environment variables that change GPU runtime behaviour, as sorted `KEY=value` lines, then
+/// where the diagnostic tools resolve on PATH (the PATH itself lists directories that say nothing
+/// about the GPU and often name the user's tools).
 pub fn env_builtin(rel_path: &str) -> Vec<Produced> {
     let environment: Vec<String> = std::env::vars_os()
         .map(|(k, v)| format!("{}={}", k.to_string_lossy(), v.to_string_lossy()))
         .collect();
-    vec![collected(rel_path, filter_environment(&environment), "")]
+    let mut text = filter_environment(&environment);
+    for tool in ENV_TOOLS {
+        let location =
+            find_in_path(tool).map_or_else(|| "(not found)".to_owned(), |p| p.to_string_lossy().into_owned());
+        let _ = writeln!(text, "# {tool}: {location}");
+    }
+    vec![collected(rel_path, text, "")]
 }
 
 /// The id-to-name tables of `/etc/passwd` and `/etc/group`.
@@ -326,19 +338,76 @@ pub fn id_builtin(reader: &dyn Reader, rel_path: &str) -> Vec<Produced> {
     vec![collected(rel_path, id_text(status_text.as_deref(), &accounts), "")]
 }
 
-/// Whether the process runs inside a container: the marker files and the cgroup paths of PID 1
-/// and of this process.
+/// The file system types whose mounts say how the container sees the system.
+const MOUNT_TYPES: &[&str] = &["sysfs", "devtmpfs", "cgroup", "cgroup2", "overlay", "debugfs"];
+/// Mount points that decide whether a GPU stack can work.
+const MOUNT_POINTS: &[&str] = &[
+    "/dev/dri",
+    "/dev/dxg",
+    "/sys/kernel/debug",
+    "/lib/firmware",
+    "/lib/x86_64-linux-gnu/dri",
+    "/usr/share/vulkan",
+    "/etc/OpenCL",
+    "/usr/lib/wsl",
+];
+
+/// One mountinfo line as `(mount point, file system type, source)`. The root of the mount in its
+/// file system (the field before the mount point) is left out: for a bind mount it names a host
+/// directory.
+pub fn parse_mount(line: &str) -> Option<(&str, &str, &str)> {
+    let (before, after) = line.split_once(" - ")?;
+    let mount_point = before.split(' ').nth(4)?;
+    let mut tail = after.split(' ');
+    let (fs_type, source) = (tail.next()?, tail.next()?);
+    Some((mount_point, fs_type, source))
+}
+
+/// The mounts that decide whether a GPU stack can work inside a container, as
+/// `<mount point> <type> <source>`: the device nodes, firmware, driver and loader directories, and
+/// the sysfs, devtmpfs, cgroup, overlay and debugfs mounts. In mountinfo order, at most 40.
+pub fn gpu_mounts(mountinfo: &str) -> Vec<String> {
+    mountinfo
+        .lines()
+        .filter_map(parse_mount)
+        .filter(|(point, fs_type, _)| {
+            // Overlay mounts of other containers sit under the container runtime's directory on a
+            // host; only the root and the system file systems are the container's own view.
+            (MOUNT_TYPES.contains(fs_type)
+                && (*point == "/" || point.starts_with("/sys") || point.starts_with("/dev")))
+                || MOUNT_POINTS.iter().any(|marker| point.contains(marker))
+        })
+        .map(|(point, fs_type, source)| format!("{point} {fs_type} {source}"))
+        .take(40)
+        .collect()
+}
+
+/// Whether the process runs inside a container or a virtual machine that passes the GPU through:
+/// the marker files, the cgroup paths of PID 1 and of this process, the user namespace id maps,
+/// the GPU-related mounts and the signs of a Windows Subsystem for Linux guest.
 pub fn container_builtin(reader: &dyn Reader, rel_path: &str) -> Vec<Produced> {
     let mut text = String::new();
-    for marker in ["/.dockerenv", "/run/.containerenv"] {
-        text.push_str(&format!(
-            "{marker}: {}\n",
-            if Path::new(marker).exists() { "present" } else { "absent" }
-        ));
+    for marker in ["/.dockerenv", "/run/.containerenv", "/dev/dxg", "/usr/lib/wsl"] {
+        let _ = writeln!(text, "{marker}: {}", if Path::new(marker).exists() { "present" } else { "absent" });
     }
+    let release = read_head(reader, Path::new("/proc/sys/kernel/osrelease"), PROBE_MAX);
+    let wsl = String::from_utf8_lossy(&release.data).to_ascii_lowercase().contains("microsoft");
+    let _ = writeln!(text, "kernel release names Microsoft (WSL): {}", if wsl { "yes" } else { "no" });
     for cgroup in ["/proc/1/cgroup", "/proc/self/cgroup"] {
         text.push_str(&format_probe_line(cgroup, &read_head(reader, Path::new(cgroup), PROBE_MAX)));
         text.push('\n');
+    }
+    for map in ["/proc/self/uid_map", "/proc/self/gid_map"] {
+        let line = format_probe_line(map, &read_head(reader, Path::new(map), PROBE_MAX));
+        text.push_str(&line.lines().map(trim).collect::<Vec<_>>().join("; "));
+        text.push('\n');
+    }
+    let mountinfo = read_head(reader, Path::new("/proc/self/mountinfo"), ACCOUNTS_MAX);
+    let mountinfo = String::from_utf8_lossy(&mountinfo.data).into_owned();
+    let mounts = gpu_mounts(&mountinfo);
+    let _ = writeln!(text, "GPU-related mounts: {}", if mounts.is_empty() { "none" } else { "" });
+    for mount in mounts {
+        let _ = writeln!(text, "  {mount}");
     }
     vec![collected(rel_path, text, "")]
 }
@@ -455,9 +524,42 @@ pub fn links_builtin(rel_path: &str, os_path: &str) -> Vec<Produced> {
             Ok(target) => link_target_name(&target.to_string_lossy()),
             Err(_) => "(absent)".to_owned(),
         };
-        text.push_str(&format!("{name}: {value}\n"));
+        let _ = writeln!(text, "{name}: {value}");
     }
+    text.push_str(&virtual_functions(Path::new(os_path)));
     vec![collected(rel_path, text, "")]
+}
+
+/// The most virtual functions listed.
+const VIRTUAL_FUNCTIONS_MAX: usize = 64;
+
+/// The virtual functions of an SR-IOV physical function, one line each:
+/// `virtfn0: 0000:03:00.1, driver vfio-pci`. Empty when the device has none.
+pub fn virtual_functions(device_dir: &Path) -> String {
+    let Ok(entries) = fs::read_dir(device_dir) else {
+        return String::new();
+    };
+    let mut functions: Vec<(u32, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let number = name.strip_prefix("virtfn")?.parse().ok()?;
+            Some((number, e.path()))
+        })
+        .collect();
+    functions.sort();
+    let mut text = String::new();
+    for (number, path) in functions.iter().take(VIRTUAL_FUNCTIONS_MAX) {
+        let function = fs::read_link(path)
+            .map_or_else(|_| "(unknown)".to_owned(), |t| link_target_name(&t.to_string_lossy()));
+        let driver = fs::read_link(path.join("driver"))
+            .map_or_else(|_| "none".to_owned(), |t| link_target_name(&t.to_string_lossy()));
+        let _ = writeln!(text, "virtfn{number}: {function}, driver {driver}");
+    }
+    if functions.len() > VIRTUAL_FUNCTIONS_MAX {
+        let _ = writeln!(text, "... and {} more", functions.len() - VIRTUAL_FUNCTIONS_MAX);
+    }
+    text
 }
 
 /// Distribution identification from `/usr/lib/os-release`, for hosts without `/etc/os-release`:

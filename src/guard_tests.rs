@@ -145,3 +145,17 @@ fn shared_between_threads() {
     }
     assert!(!guard.any_abandoned());
 }
+
+#[test]
+fn a_group_can_be_opened_by_hand_and_then_fails_fast() {
+    let guard = Guard::new(Duration::from_secs(5));
+    assert!(!guard.is_open("usermode"));
+    guard.open("usermode");
+    assert!(guard.is_open("usermode") && guard.any_abandoned());
+    assert!(!guard.is_open("host"));
+    let ran = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&ran);
+    assert_eq!(guard.bounded("usermode", move || flag.store(true, Ordering::SeqCst)), None);
+    assert!(!ran.load(Ordering::SeqCst));
+    assert_eq!(guard.bounded("host", || 1), Some(1));
+}

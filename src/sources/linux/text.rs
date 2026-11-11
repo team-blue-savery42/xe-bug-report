@@ -8,14 +8,115 @@ use std::time::Duration;
 
 use crate::bundle::source::{ReadOutcome, ReadResult};
 use crate::pci::PciAddress;
+use crate::sources::debug_keys::is_debug_key;
 
-/// Environment variable prefixes recorded in `system/env.txt`.
+/// Environment variable prefixes recorded in `system/env.txt`: the runtime, compiler, media,
+/// graphics-loader and driver debug variables. Generic prefixes (`CL_`, `MDA_`, `INTEL_`) are not
+/// here: they match licence, account and cache settings that have nothing to do with the GPU.
 const ENV_PREFIXES: &[&str] = &[
-    "NEO_", "ZE_", "ZET_", "ZES_", "ZEL_", "ZEX_", "ONEAPI_", "SYCL_", "UR_", "IGC_", "OCL_", "XPU_SMI_",
-    "XPUM_", "LIBVA_", "INTEL_",
+    "NEO_",
+    "ZE_",
+    "ZET_",
+    "ZES_",
+    "ZEL_",
+    "ZEX_",
+    "ONEAPI_",
+    "SYCL_",
+    "UR_",
+    "IGC_",
+    "OCL_",
+    "XPU_SMI_",
+    "XPUM_",
+    "LIBVA_",
+    "MESA_",
+    "ANV_",
+    "HASVK_",
+    "VK_",
+    "DRI_PRIME",
+    "DRIRC_",
+    "LIBGL_",
+    "EGL_",
+    "GALLIUM_",
+    "GBM_",
+    "__GLX_",
+    "MFX_",
+    "VPL_",
+    "ONEVPL_",
+    "OPENCL_",
 ];
-/// Environment variables recorded by exact name.
-const ENV_EXACT: &[&str] = &["LD_PRELOAD", "LD_LIBRARY_PATH", "PATH", "LANG", "LC_ALL", "container"];
+/// Environment variables recorded by exact name. `NEOReadDebugKeys` does not start with `NEO_`.
+/// The `INTEL_` names are the ones the Mesa Intel drivers read.
+const ENV_EXACT: &[&str] = &[
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LANG",
+    "LC_ALL",
+    "container",
+    "NEOReadDebugKeys",
+    "vblank_mode",
+    "XDG_SESSION_TYPE",
+    "XDG_CURRENT_DESKTOP",
+    "INTEL_DEBUG",
+    "INTEL_MEASURE",
+    "INTEL_NO_HW",
+    "INTEL_PRECISE_TRIG",
+    "INTEL_BLACKHOLE_DEFAULT",
+    "INTEL_COMPUTE_CLASS",
+];
+/// Words (lower case) in a variable name that mean it holds a credential, an account, a licence or
+/// a network location. A variable whose name has one is never recorded, whatever its prefix.
+const ENV_SECRET_WORDS: &[&str] = &[
+    "token",
+    "password",
+    "passwd",
+    "secret",
+    "credential",
+    "auth",
+    "cookie",
+    "apikey",
+    "privatekey",
+    "accesskey",
+    "key",
+    "license",
+    "licence",
+    "user",
+    "login",
+    "proxy",
+    "url",
+    "host",
+    "server",
+];
+/// The directories a path-valued variable may point into and still be recorded as written. Others
+/// are likely to name a user, a project or a company, and are replaced by `<path>`.
+const ENV_PATH_ROOTS: &[&str] = &["/usr", "/opt/intel", "/etc", "/lib", "/run", "/home/", "~"];
+/// Name endings (upper case) of variables that hold file system paths.
+const ENV_PATH_SUFFIXES: &[&str] =
+    &["DIR", "DIRECTORY", "PATH", "FILE", "FILES", "FILENAME", "FILENAMES", "PRELOAD"];
+/// Recorded values are cut at this many characters.
+const ENV_VALUE_MAX_CHARS: usize = 512;
+
+/// Whether a variable holds file system paths, by its name.
+fn is_path_variable(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    ENV_PATH_SUFFIXES.iter().any(|suffix| upper.ends_with(suffix))
+}
+
+/// A path-valued variable's value as it may be recorded: unchanged when every entry starts in one
+/// of the [`ENV_PATH_ROOTS`] (entries are separated by `:` or blanks), else `<path>`.
+pub fn safe_path_value(value: &str) -> String {
+    let ok = value
+        .split([':', ' '])
+        .filter(|entry| !entry.is_empty())
+        .all(|entry| ENV_PATH_ROOTS.iter().any(|root| entry.starts_with(root)));
+    if ok { value.to_owned() } else { "<path>".to_owned() }
+}
+
+/// Whether a variable name is one the report may record: not a credential, account, licence or
+/// network location by its name.
+fn name_is_harmless(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    !ENV_SECRET_WORDS.iter().any(|w| lower.contains(w))
+}
 
 /// The most lines `journalctl` is asked for.
 pub const JOURNAL_MAX_LINES: u32 = 200_000;
@@ -196,19 +297,34 @@ pub fn upstream_bridges(os_path: &str) -> Vec<PciAddress> {
     bdfs
 }
 
-/// The environment variables worth recording, as sorted `KEY=value` lines.
+/// The environment variables worth recording, as sorted `KEY=value` lines. When `NEOReadDebugKeys`
+/// is set to something other than empty or 0, the variables named like compute runtime debug keys
+/// (see [`crate::sources::debug_keys`]) are recorded too. Names that look like credentials,
+/// accounts, licences or network locations are dropped even when a prefix matches, path values
+/// outside the system directories are replaced by `<path>`, and each value is cut at 512 characters.
 pub fn filter_environment(environment: &[String]) -> String {
-    let kept: BTreeSet<&String> = environment
+    let debug_keys = environment.iter().any(|entry| {
+        entry
+            .split_once('=')
+            .is_some_and(|(key, value)| key == "NEOReadDebugKeys" && !value.is_empty() && value != "0")
+    });
+    let kept: BTreeSet<String> = environment
         .iter()
-        .filter(|entry| {
-            let Some((key, _)) = entry.split_once('=') else {
-                return false;
-            };
-            ENV_PREFIXES.iter().any(|p| key.starts_with(p)) || ENV_EXACT.contains(&key)
+        .filter_map(|entry| {
+            let (key, value) = entry.split_once('=')?;
+            let wanted = ENV_EXACT.contains(&key)
+                || (ENV_PREFIXES.iter().any(|p| key.starts_with(p)) && name_is_harmless(key))
+                || (debug_keys && is_debug_key(key));
+            if !wanted {
+                return None;
+            }
+            let value: String = value.chars().take(ENV_VALUE_MAX_CHARS).collect();
+            let value = if is_path_variable(key) { safe_path_value(&value) } else { value };
+            Some(format!("{key}={value}"))
         })
         .collect();
     kept.into_iter().fold(String::new(), |mut text, entry| {
-        text.push_str(entry);
+        text.push_str(&entry);
         text.push('\n');
         text
     })
@@ -310,6 +426,78 @@ pub fn resolver_domains(resolv_conf: &str) -> Vec<String> {
         }
     }
     domains
+}
+
+/// Domains that name a public service, not this site: a package repository or a code host that
+/// every machine of the kind may talk to. They stay readable when they are a machine's domain.
+const PUBLIC_DOMAINS: &[&str] = &[
+    "ubuntu.com",
+    "debian.org",
+    "launchpad.net",
+    "launchpadcontent.net",
+    "fedoraproject.org",
+    "opensuse.org",
+    "github.com",
+    "docker.com",
+    "example.com",
+    "example.net",
+    "example.org",
+];
+/// Top-level and generic second-level domains: too general to be a site's own domain.
+const PUBLIC_SUFFIXES: &[&str] = &[
+    "com",
+    "org",
+    "net",
+    "edu",
+    "gov",
+    "mil",
+    "int",
+    "io",
+    "co.uk",
+    "ac.uk",
+    "gov.uk",
+    "org.uk",
+    "com.au",
+    "co.jp",
+    "co.in",
+    "com.cn",
+    "localdomain",
+    "local",
+    "lan",
+    "home",
+    "internal",
+    "invalid",
+    "test",
+];
+
+/// The private domain names of this machine: the domain part of its fully qualified host name and
+/// every resolver `search` or `domain` entry. A name is dropped when it has no dot (a single label
+/// is too general), is a public suffix, or is one of the [`PUBLIC_DOMAINS`] (or below one), so that
+/// `example.com` and the public package repositories stay readable. Lower case, without duplicates.
+pub fn private_domains(host_name: &str, resolver: &[String]) -> Vec<String> {
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some((_, domain)) = trim(host_name).split_once('.') {
+        candidates.push(domain.to_owned());
+    }
+    candidates.extend(resolver.iter().cloned());
+    let mut out: Vec<String> = Vec::new();
+    for candidate in candidates {
+        let name = trim(&candidate).trim_matches('.').to_ascii_lowercase();
+        let public = |list: &[&str]| list.iter().any(|d| name == *d || name.ends_with(&format!(".{d}")));
+        if !name.contains('.') || PUBLIC_SUFFIXES.contains(&name.as_str()) || public(PUBLIC_DOMAINS) {
+            continue;
+        }
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// A machine id as `/etc/machine-id` writes it: 32 hexadecimal digits. None for anything else.
+pub fn parse_machine_id(text: &str) -> Option<String> {
+    let id = trim(text);
+    (id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).then(|| id.to_ascii_lowercase())
 }
 
 /// The user names the redactor should treat as personal.

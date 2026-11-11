@@ -371,6 +371,68 @@ fn a_stub_xpu_smi_is_run_and_recorded_in_the_manifest() {
     assert!(version.contains("Version: 9.9.9.stub"), "{version}");
 }
 
+/// A stub `xpu-smi` with the given shell body, in a temporary directory.
+fn stub_xpu_smi(dir: &Path, body: &str) -> std::path::PathBuf {
+    let stub = dir.join("xpu-smi-stub");
+    std::fs::write(&stub, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    stub
+}
+
+#[test]
+fn children_cannot_write_core_files() {
+    // A crashing child must not leave a core file with its memory in the user's directory: the
+    // limit is zero for the collector and so for everything it starts.
+    let dir = common::temp_dir();
+    let stub = stub_xpu_smi(dir.path(), "echo \"Version: 1\"; echo \"core limit: $(ulimit -c)\"");
+    let out = common::temp_dir();
+    let (_, zip) = minimal_bundle(out.path(), &["--xpu-smi", stub.to_str().unwrap()]);
+    let version = String::from_utf8(zip.read_named("xpu-smi/version.txt").unwrap()).unwrap();
+    assert!(version.contains("core limit: 0\n"), "{version}");
+}
+
+#[test]
+fn a_child_killed_by_a_signal_is_failed_with_the_signal_named() {
+    let dir = common::temp_dir();
+    let stub = stub_xpu_smi(dir.path(), "echo 'about to die'; kill -KILL $$");
+    let out = common::temp_dir();
+    let (_, zip) = minimal_bundle(out.path(), &["--xpu-smi", stub.to_str().unwrap()]);
+    let manifest = zip.manifest().unwrap();
+    let row = sources_of(&manifest)
+        .iter()
+        .find(|s| s["path"] == "xpu-smi/version.txt")
+        .expect("the version source is listed");
+    assert_eq!(row["status"], "failed", "{row}");
+    assert_eq!(row["reason"], "killed by signal 9 (SIGKILL)", "{row}");
+    assert_eq!(row["exit"], 137, "{row}");
+}
+
+#[test]
+fn the_kernel_state_and_container_facts_are_collected_without_privileges() {
+    let dir = common::temp_dir();
+    let (_, zip) = minimal_bundle(dir.path(), &[]);
+    let manifest = zip.manifest().unwrap();
+    let status_of = |path: &str| {
+        sources_of(&manifest)
+            .iter()
+            .find(|s| s["path"] == path)
+            .map(|s| s["status"].as_str().unwrap().to_owned())
+    };
+    assert_eq!(status_of("system/state.txt").as_deref(), Some("collected"));
+    assert_eq!(status_of("system/platform-devices.txt").as_deref(), Some("collected"));
+    let state = String::from_utf8(zip.read_named("system/state.txt").unwrap()).unwrap();
+    assert!(state.contains("kernel.tainted: "), "{state}");
+    assert!(state.contains("kernel version: Linux version "), "{state}");
+
+    // The cgroup v2 marker of a containerised or systemd process must survive address redaction.
+    let cgroup = std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
+    if cgroup.starts_with("0::/") {
+        let container = String::from_utf8(zip.read_named("system/container.txt").unwrap()).unwrap();
+        assert!(container.contains("/proc/self/cgroup: 0::/"), "{container}");
+        assert!(!container.contains("<ipv6>"), "{container}");
+    }
+}
+
 // ---- redaction ----
 
 /// Names that identify no one; the rules leave them alone.

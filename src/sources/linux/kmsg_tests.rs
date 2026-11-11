@@ -144,7 +144,7 @@ fn without_a_window_an_empty_journal_falls_back_to_the_ring() {
 
 #[test]
 fn the_ring_is_filtered_by_a_cutoff_on_the_monotonic_clock() {
-    // the cutoff is the monotonic reading minus the window.
+    // The cutoff is the monotonic reading minus the window.
     let reader = FakeReader::sync(None);
     let j = journal(ChildOutcome::Exited(1), "boom");
     let seen = std::cell::Cell::new(None);
@@ -273,4 +273,40 @@ fn a_missing_ring_device_is_failed_not_a_panic() {
     let read = read_kmsg(Path::new("/nonexistent/kmsg"), None);
     assert_eq!(read.status, KmsgStatus::Failed);
     assert!(read.text.is_empty());
+}
+
+fn log_artifact(status: Status, data: &str) -> Produced {
+    Produced {
+        rel_path: "kernel/kmsg.txt".to_owned(),
+        status,
+        data: data.as_bytes().to_vec(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn the_extract_sits_next_to_its_log() {
+    assert_eq!(extract_path("kernel/kmsg.txt"), "kernel/kmsg-extract.txt");
+    assert_eq!(extract_path("kernel/kmsg-prev-boot.txt"), "kernel/kmsg-prev-boot-extract.txt");
+    let log = [log_artifact(Status::Collected, "[1.0] xe: *ERROR* boom\n")];
+    let extract = extract_artifact(&log, "kernel/kmsg.txt").unwrap();
+    assert_eq!(extract.rel_path, "kernel/kmsg-extract.txt");
+    assert_eq!(extract.status, Status::Collected);
+    assert_eq!(extract.via, "derived from kernel/kmsg.txt");
+    assert!(String::from_utf8_lossy(&extract.data).contains("*ERROR* boom"));
+    let cut = [log_artifact(Status::Truncated, "[1.0] xe: *ERROR* boom\n")];
+    let text = String::from_utf8_lossy(&extract_artifact(&cut, "kernel/kmsg.txt").unwrap().data).into_owned();
+    assert!(text.contains("cut at its size limit"));
+}
+
+#[test]
+fn no_extract_without_a_log_to_derive_it_from() {
+    for log in [
+        log_artifact(Status::Skipped, ""),
+        log_artifact(Status::Collected, ""),
+        log_artifact(Status::Collected, "no kernel messages in the last 30 minutes\n"),
+    ] {
+        assert!(extract_artifact(&[log], "kernel/kmsg.txt").is_none());
+    }
+    assert!(extract_artifact(&[], "kernel/kmsg.txt").is_none());
 }

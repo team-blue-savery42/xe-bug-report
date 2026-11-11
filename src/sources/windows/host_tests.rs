@@ -2,6 +2,7 @@
 //! Unit tests for `src/sources/windows/host.rs`.
 
 use super::*;
+use crate::sources::debug_keys::DEBUG_KEY_NAMES;
 
 #[test]
 fn identity_has_host_fqdn_and_user() {
@@ -179,7 +180,7 @@ fn the_debug_key_list_is_clean_and_matches_prefixed_names() {
         "neo_ocl_PrintDebugMessages",
         "NEO_L0_PrintDebugMessages",
     ] {
-        assert!(is_debug_key_name(name), "{name}");
+        assert!(is_debug_key(name), "{name}");
     }
     for name in [
         "",
@@ -191,7 +192,7 @@ fn the_debug_key_list_is_clean_and_matches_prefixed_names() {
         "CLIENTNAME",
         "PrintDebugMessagesX",
     ] {
-        assert!(!is_debug_key_name(name), "{name}");
+        assert!(!is_debug_key(name), "{name}");
     }
 }
 

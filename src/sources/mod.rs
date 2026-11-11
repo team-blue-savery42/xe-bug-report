@@ -3,8 +3,8 @@
 //!
 //! [`sources`] is the one table the collector, the manifest and `--list` share: the xpu-smi
 //! version row, the platform table, then the xpu-smi views, filtered by profile and in that order.
-#![forbid(unsafe_code)]
 
+pub mod debug_keys;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(any(windows, test))]
@@ -29,6 +29,9 @@ pub const RAS_COUNTERS_UNSUPPORTED_MARKER: &str = "No valid metrics matched";
 /// What an xpu-smi that does not know a subcommand (an older build without `raslog` or
 /// `crashlog`) prints: "'raslog' is not a valid subcommand." followed by its usage text.
 pub const UNKNOWN_SUBCOMMAND_MARKER: &str = "is not a valid subcommand";
+
+/// What a detailed `xpu-smi discovery` prints when the DMI tables are not readable.
+pub const DMI_DENIED_MARKER: &str = "Cannot access DMI tables";
 
 /// The query fields of the RAS error counters: every `ras.*` and `ecc.errors.*` field of xpu-smi.
 /// A field this xpu-smi does not know makes the query print [`RAS_COUNTERS_UNSUPPORTED_MARKER`], and
@@ -120,19 +123,31 @@ fn version_line(text: &str) -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Tools {
     pub dpkg: bool,
-    /// `rpm` is on PATH.
     pub rpm: bool,
-    /// `iclg` is on PATH (firmware crash log extraction).
+    /// Firmware crash log extraction.
     pub iclg: bool,
+    pub vulkaninfo: bool,
+    pub eglinfo: bool,
+    pub sycl_ls: bool,
+    pub intel_gpu_top: bool,
+    pub icpx: bool,
+    pub coredumpctl: bool,
 }
 
 impl Tools {
     /// Looks for the tools on PATH.
     pub fn detect() -> Self {
+        let present = |name: &str| find_in_path(name).is_some();
         Self {
-            dpkg: find_in_path("dpkg-query").is_some(),
-            rpm: find_in_path("rpm").is_some(),
-            iclg: find_in_path("iclg").is_some(),
+            dpkg: present("dpkg-query"),
+            rpm: present("rpm"),
+            iclg: present("iclg"),
+            vulkaninfo: present("vulkaninfo"),
+            eglinfo: present("eglinfo"),
+            sycl_ls: present("sycl-ls"),
+            intel_gpu_top: present("intel_gpu_top"),
+            icpx: present("icpx"),
+            coredumpctl: present("coredumpctl"),
         }
     }
 }
@@ -161,12 +176,12 @@ fn gpu_view(source: Source) -> Source {
     }
 }
 
-/// The xpu-smi views, per OS as the reference tables have them. They run the xpu-smi executable
+/// The xpu-smi views, per OS. They run the xpu-smi executable
 /// named by [`SourceOptions::xpu_smi`]; the rows exist even when it is None, and the collector then
 /// skips them as "xpu-smi not found".
 ///
-/// Linux: discovery, topology, then per device discovery, statistics, configuration, health and
-/// RAS counters, then the CPER RAS log, the firmware crash logs (only where `iclg` exists) and the
+/// Linux: discovery, topology, then per device discovery, statistics, configuration, health, the
+/// processes using the device and RAS counters, then the CPER RAS log, the firmware crash logs (only where `iclg` exists) and the
 /// metric samples. Windows: discovery, topology, then per device discovery, statistics,
 /// configuration, RAS counters and metric samples (no health, RAS log or crash log).
 pub fn xpu_smi_views(options: &SourceOptions, tools: &Tools) -> Vec<Source> {
@@ -176,7 +191,7 @@ pub fn xpu_smi_views(options: &SourceOptions, tools: &Tools) -> Vec<Source> {
 /// [`xpu_smi_views`] for the Linux (`linux`) or the Windows table, so both shapes are testable on
 /// either OS. The gates and availability checks follow the OS this is compiled for.
 fn views_for(options: &SourceOptions, tools: &Tools, linux: bool) -> Vec<Source> {
-    // The reference words the views differently per OS.
+    // The views are worded differently per OS.
     let why_for =
         |on_linux: &'static str, on_windows: &'static str| if linux { on_linux } else { on_windows };
     let args = |parts: &[&str]| -> Vec<String> { parts.iter().map(|p| (*p).to_owned()).collect() };
@@ -222,12 +237,15 @@ fn views_for(options: &SourceOptions, tools: &Tools, linux: bool) -> Vec<Source>
         let bdf = device.bdf.to_string();
         let group = device_group(device);
         let mut add = |source: Source| out.push(source.group(&group));
-        add(view(
+        let discovery = view(
             &format!("{dir}discovery.json"),
             &args(&["discovery", "-d", &bdf, "-j"]),
             Profile::Default,
             why_for("Detailed properties of the device.", "xpu-smi discovery of one device"),
-        ));
+        );
+        // On Linux the detailed discovery reads the DMI tables, which only root may read; without
+        // that it prints a message and can crash, and the firmware inventory is missing.
+        add(if linux { discovery.gate(Gate::Root).denied_marker(DMI_DENIED_MARKER) } else { discovery });
         add(view(
             &format!("{dir}stats.json"),
             &args(&["stats", "-d", &bdf, "-j"]),
@@ -249,6 +267,14 @@ fn views_for(options: &SourceOptions, tools: &Tools, linux: bool) -> Vec<Source>
                 &args(&["health", "-d", &bdf, "-j"]),
                 Profile::Default,
                 "Component health status.",
+            ));
+        }
+        if linux {
+            add(view(
+                &format!("{dir}ps.json"),
+                &args(&["ps", "-d", &bdf, "-j"]),
+                Profile::Default,
+                "Processes using the device, as the driver reports them.",
             ));
         }
         add(view(

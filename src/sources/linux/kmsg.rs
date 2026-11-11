@@ -16,6 +16,7 @@ use crate::sys::unix::monotonic_now;
 use crate::units::Bytes;
 
 use super::debugfs::{collected, needs_text, skipped};
+use super::extract::extract_kernel_log;
 use super::text::{
     JournalVerdict, classify_journal, describe_window, format_kmsg_record, journal_argv, kmsg_timestamp,
 };
@@ -140,9 +141,32 @@ pub fn kernel_log(reader: &dyn Reader, rel_path: &str, boot: Boot, since: Option
     let argv = journal_argv(since, boot == Boot::Previous);
     let journal = run_child(&argv, journal_timeout(since), JOURNAL_MAX_OUTPUT);
     let now = monotonic_now();
-    kernel_log_with(reader, rel_path, boot, since, &argv, &journal, now, &|not_before| {
+    let mut out = kernel_log_with(reader, rel_path, boot, since, &argv, &journal, now, &|not_before| {
         read_kmsg(Path::new(KMSG_PATH), not_before)
-    })
+    });
+    out.extend(extract_artifact(&out, rel_path));
+    out
+}
+
+/// The path of the extract that goes with the kernel log at `rel_path`:
+/// `kernel/kmsg.txt` gives `kernel/kmsg-extract.txt`.
+pub fn extract_path(rel_path: &str) -> String {
+    format!("{}-extract.txt", rel_path.strip_suffix(".txt").unwrap_or(rel_path))
+}
+
+/// The extract of the log in `produced` (see [`extract_kernel_log`]); None when the log was not
+/// collected or holds only the note of an empty time window.
+pub fn extract_artifact(produced: &[Produced], rel_path: &str) -> Option<Produced> {
+    let log = produced.iter().find(|p| p.rel_path == rel_path)?;
+    if !matches!(log.status, Status::Collected | Status::Truncated)
+        || log.data.is_empty()
+        || log.data.starts_with(b"no kernel messages in the last ")
+    {
+        return None;
+    }
+    let text =
+        extract_kernel_log(&String::from_utf8_lossy(&log.data), rel_path, log.status == Status::Truncated);
+    Some(collected(extract_path(rel_path), text, format!("derived from {rel_path}")))
 }
 
 /// [`kernel_log`] with the journal result, the monotonic clock and the `/dev/kmsg` reader supplied.

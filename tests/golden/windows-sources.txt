@@ -1,4 +1,4 @@
-# Paths from oal/win/log_sources.cpp of the reference (head 012345678); replace with the
+# The Windows source paths of this tool, in table order; replace with the
 # `xe-bug-report --list --full` output of the first Windows CI run.
 xpu-smi/version.txt
 system/os.txt

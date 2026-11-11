@@ -15,8 +15,10 @@ use crate::units::Bytes;
 
 /// Names that can change device state when read, or are otherwise unsafe to open.
 const DEBUGFS_DENY_EXACT: &[&str] = &["forcewake_all", "wedged_mode"];
-/// Name patterns on the debugfs denylist.
-const DEBUGFS_DENY_GLOBS: &[&str] = &["force_*", "fail_*", "*reset*", "*inject*"];
+/// Name patterns on the debugfs denylist. `*force*` rather than `force_*` so that a name such as
+/// `i915_dp_force_link_rate` is caught; `*dmesg*` and `*lfd*` are the GuC log variants that write
+/// into the kernel log or stream the log through a different path.
+const DEBUGFS_DENY_GLOBS: &[&str] = &["*force*", "fail_*", "*reset*", "*inject*", "*dmesg*", "*lfd*"];
 
 /// The root of the DRM debugfs directories.
 pub const DEBUGFS_DRI: &str = "/sys/kernel/debug/dri";
@@ -116,32 +118,73 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
 }
 
 /// Whether a debugfs name can change device state when read or is otherwise unsafe to open:
-/// `forcewake_all`, `wedged_mode`, `force_*`, `fail_*`, `*reset*`, `*inject*`.
+/// `forcewake_all`, `wedged_mode`, `*force*`, `fail_*`, `*reset*`, `*inject*`, `*dmesg*`, `*lfd*`.
 pub fn is_denied_debugfs_name(name: &str) -> bool {
     DEBUGFS_DENY_EXACT.contains(&name) || DEBUGFS_DENY_GLOBS.iter().any(|g| glob_match(g, name))
 }
 
+/// Files in the device directory itself: driver identity, SR-IOV and fault information, the
+/// memory manager dumps, and the display state (which exists when the driver was built with
+/// display support). Each name is exact; a name the driver does not have is skipped silently.
+const DEVICE_FILES: &[&str] = &[
+    "name",
+    "info",
+    "sriov_info",
+    "pagefault_info",
+    "gtt_mm",
+    "stolen_mm",
+    "i915_display_info",
+    "i915_dmc_info",
+    "i915_cdclk_info",
+    "i915_power_domain_info",
+    "i915_psr_status",
+    "i915_edp_psr_status",
+    "i915_psr_sink_status",
+    "i915_fbc_status",
+    "i915_drrs_status",
+    "i915_sagv_status",
+    "i915_ipc_status",
+    "i915_lpsp_status",
+    "i915_sr_status",
+    "i915_shared_dplls_info",
+    "i915_dp_mst_info",
+    "i915_ddb_info",
+    "i915_edp_lobf_info",
+    "intel_display_caps",
+    "i915_vbt",
+];
+/// Files of one tile directory.
+const TILE_FILES: &[&str] = &["vram_mm", "ggtt", "sa_info"];
+/// Files of one GT directory.
+const GT_FILES: &[&str] = &[
+    "hw_engines",
+    "topology",
+    "steering",
+    "pat_sw_config",
+    "register-save-restore",
+    "workarounds",
+    "tunings",
+    "hwconfig",
+    "abi_versions",
+    "self_config",
+    "stats",
+    "powergate_info",
+];
+/// Files of the microcontroller directory of one GT (`uc/`).
+const UC_FILES: &[&str] = &["guc_info", "huc_info", "gsc_info", "guc_pc"];
+
 /// The debugfs files to read, relative to the device's `dri` directory; `*` matches within one
-/// component. The GuC log is large and only collected with `include_guc_log`.
-pub fn debugfs_patterns(include_guc_log: bool) -> Vec<String> {
-    let mut patterns: Vec<String> = [
-        "name",
-        "info",
-        "clients",
-        "sriov_info",
-        "gt*/hw_engines",
-        "gt*/topology",
-        "gt*/steering",
-        "gt*/pat",
-        "gt*/register-save-restore",
-        "gt*/uc/guc_info",
-        "gt*/uc/huc_info",
-    ]
-    .map(str::to_owned)
-    .to_vec();
-    if include_guc_log {
-        patterns.push("gt*/uc/guc_log".to_owned());
+/// component. The GT files are looked for in `gt*/` and in `tile*/gt*/`, because the driver has
+/// used both layouts; an absent one is skipped. The GuC log is the largest file and comes last.
+pub fn debugfs_patterns() -> Vec<String> {
+    let mut patterns: Vec<String> = DEVICE_FILES.iter().map(|n| (*n).to_owned()).collect();
+    patterns.extend(TILE_FILES.iter().map(|n| format!("tile*/{n}")));
+    for gt in ["gt*", "tile*/gt*"] {
+        patterns.extend(GT_FILES.iter().map(|n| format!("{gt}/{n}")));
+        patterns.extend(UC_FILES.iter().map(|n| format!("{gt}/uc/{n}")));
     }
+    patterns.push("gt*/uc/guc_log".to_owned());
+    patterns.push("tile*/gt*/uc/guc_log".to_owned());
     patterns
 }
 
@@ -228,13 +271,13 @@ pub fn find_debugfs_dir(reader: &dyn Reader, dri_root: &Path, bdf: &PciAddress) 
 
 /// The allowlisted debugfs files of one device: one artifact per file named by its path below
 /// `rel_dir` (Collected, Truncated, Skipped `needs root`, or Failed), or a single Skipped artifact
-/// named `rel_dir` when debugfs is not mounted, not readable or has no directory for the device.
+/// named `rel_dir` when debugfs is not mounted, not readable, has no directory for the device or
+/// none of the listed files exists.
 pub fn debugfs_builtin(
     reader: &dyn Reader,
     dri_root: &Path,
     rel_dir: &str,
     bdf: &PciAddress,
-    include_guc_log: bool,
 ) -> Vec<Produced> {
     let dir = match find_debugfs_dir(reader, dri_root, bdf) {
         DebugfsLookup::Error(e) => {
@@ -246,7 +289,7 @@ pub fn debugfs_builtin(
         DebugfsLookup::Found(dir) => dir,
     };
     let mut out = Vec::new();
-    for pattern in debugfs_patterns(include_guc_log) {
+    for pattern in debugfs_patterns() {
         let mut files = Vec::new();
         expand_pattern(&dir, Path::new(""), &pattern, &mut files);
         for rel in files {
@@ -257,6 +300,9 @@ pub fn debugfs_builtin(
                 out.push(produced);
             }
         }
+    }
+    if out.is_empty() {
+        return vec![skipped(rel_dir, "none of the listed debugfs files exists for this driver")];
     }
     out
 }

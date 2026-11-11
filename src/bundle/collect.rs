@@ -27,6 +27,9 @@ use crate::units::Bytes;
 /// How long one file read may block before its guard group is abandoned.
 pub const FILE_READ_LIMIT: Duration = Duration::from_secs(5);
 
+/// The guard group of the sources that do not belong to a device or a tool family.
+const HOST_GROUP: &str = "host";
+
 /// The reason of a source that was not started because the `--timeout` deadline had passed.
 pub const DEADLINE_REASON: &str = "collector deadline reached";
 /// The reason of an xpu-smi source when there is no xpu-smi executable.
@@ -973,11 +976,19 @@ impl Collector<'_, '_> {
             ChildOutcome::TimedOut => {
                 artifact.status = Status::TimedOut;
                 artifact.reason = overran(source.timeout);
+                // A tool that ran into its limit is most likely stuck on a state its group-mates
+                // share (a wedged device): they are skipped instead of each running to its limit.
+                // The shared host group is not opened: its sources do not depend on one another.
+                if !clipped && source.group != HOST_GROUP {
+                    self.guard.open(&source.group);
+                }
                 return artifact;
             }
             ChildOutcome::Exited(code) => *code,
         };
         artifact.exit = Some(code);
+        // A child killed by a signal produced no result, whatever it printed before it died.
+        let crash = crash_reason(code);
         if let Some(marker) = &source.unsupported_marker
             && contains_subslice(&child.output, marker.as_bytes())
         {
@@ -1013,9 +1024,7 @@ impl Collector<'_, '_> {
             capped |= tally.capped;
             unreadable = tally.failed;
         } else if code != 0 && !has_output {
-            artifact.status = Status::Failed;
-            artifact.reason = format!("exit code {code}");
-            return artifact;
+            return artifact.with(Status::Failed, crash.unwrap_or_else(|| format!("exit code {code}")));
         } else {
             let output = std::mem::take(&mut child.output);
             let cut = capped.then_some(Keep::Head);
@@ -1033,10 +1042,13 @@ impl Collector<'_, '_> {
                 artifact.reason = "produced no output".to_owned();
             } else {
                 artifact.status = Status::Failed;
-                artifact.reason = format!("exit code {code}");
+                artifact.reason = crash.unwrap_or_else(|| format!("exit code {code}"));
             }
         } else if marker_seen && artifact.status != Status::Failed {
             deny(&mut artifact, source, Status::Truncated);
+        } else if let Some(reason) = crash {
+            artifact.status = Status::Failed;
+            artifact.reason = reason;
         } else if unreadable > 0 && artifact.status == Status::Collected {
             artifact.status = Status::Truncated;
             artifact.reason = format!("{unreadable} files could not be read");
@@ -1258,6 +1270,48 @@ fn mark_delivered(artifact: &mut Artifact, source: &Source, delivered: &Delivere
             artifact.reason = ARCHIVE_WRITE_REASON.to_owned();
         }
     }
+}
+
+/// The name of a signal number on Linux: `SIGSEGV` for 11; `signal 40` for one without a common name.
+fn signal_label(signal: i32) -> String {
+    let name = match signal {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        4 => "SIGILL",
+        5 => "SIGTRAP",
+        6 => "SIGABRT",
+        7 => "SIGBUS",
+        8 => "SIGFPE",
+        9 => "SIGKILL",
+        10 => "SIGUSR1",
+        11 => "SIGSEGV",
+        12 => "SIGUSR2",
+        13 => "SIGPIPE",
+        14 => "SIGALRM",
+        15 => "SIGTERM",
+        24 => "SIGXCPU",
+        25 => "SIGXFSZ",
+        31 => "SIGSYS",
+        _ => return format!("signal {signal}"),
+    };
+    name.to_owned()
+}
+
+/// Why a child that exited with `code` counts as crashed: "killed by signal 11 (SIGSEGV)". The
+/// process layer reports a death by signal as 128 + the signal number. None for an ordinary exit
+/// and on Windows, where such codes mean something else.
+pub fn crash_reason(code: i32) -> Option<String> {
+    if !cfg!(unix) || !(129..=192).contains(&code) {
+        return None;
+    }
+    let signal = code - 128;
+    let label = signal_label(signal);
+    Some(if label.starts_with("signal ") {
+        format!("killed by {label}")
+    } else {
+        format!("killed by signal {signal} ({label})")
+    })
 }
 
 /// How a command's program is named in reasons.

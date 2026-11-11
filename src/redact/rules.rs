@@ -581,6 +581,15 @@ fn valid_ipv6(candidate: &[u8], dotted_tail: bool) -> bool {
     if compressed { groups <= 7 } else { groups == 8 }
 }
 
+/// Whether `candidate` followed by `next` is the unified-hierarchy marker of a cgroup line:
+/// `0::/init.scope` is hierarchy id 0, an empty controller list and a path, not the address `0::`.
+fn is_cgroup_marker(candidate: &[u8], next: Option<&u8>) -> bool {
+    let Some(id) = candidate.strip_suffix(b"::") else {
+        return false;
+    };
+    next == Some(&b'/') && (1..=2).contains(&id.len()) && id.iter().all(u8::is_ascii_digit)
+}
+
 /// Length of an IPv6 address at `i` (a hex digit or `:`), including an embedded IPv4 tail; a
 /// trailing `:` or sentence `.` is not included. 0 when none starts here.
 fn ipv6_length(text: &[u8], i: usize) -> usize {
@@ -615,7 +624,7 @@ fn ipv6_length(text: &[u8], i: usize) -> usize {
     if !dotted_tail && end - i >= 2 && text[end - 1] == b':' && text[end - 2] != b':' {
         end -= 1;
     }
-    if !valid_ipv6(&text[i..end], dotted_tail) {
+    if !valid_ipv6(&text[i..end], dotted_tail) || is_cgroup_marker(&text[i..end], text.get(end)) {
         return 0;
     }
     end - i

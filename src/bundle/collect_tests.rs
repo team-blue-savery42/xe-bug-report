@@ -126,7 +126,7 @@ fn sanitize_segment_maps_everything_else_to_underscore() {
 }
 
 #[test]
-fn labels_and_reasons_use_the_reference_texts() {
+fn labels_and_reasons_use_the_documented_texts() {
     assert_eq!(duration_label(Duration::from_secs(5)), "5 s");
     assert_eq!(duration_label(Duration::from_millis(200)), "200 ms");
     assert_eq!(needs_reason(Gate::None), "permission denied");
@@ -487,6 +487,76 @@ fn a_failing_command_without_output_is_failed() {
 }
 
 #[test]
+fn a_command_killed_by_a_signal_is_failed_and_names_the_signal() {
+    // Its partial output is kept: it can say why it died.
+    let out = run(vec![sh_source("tools/c.txt", "echo partial; kill -KILL $$")]);
+    let artifact = &out.artifacts[0];
+    assert_eq!(artifact.status, Status::Failed);
+    assert_eq!(artifact.reason, "killed by signal 9 (SIGKILL)");
+    assert_eq!(artifact.exit, Some(137));
+    assert_eq!(out.text("tools/c.txt"), "partial\n");
+    // Without output the reason is the same.
+    let artifact = run_one(sh_source("tools/c.txt", "kill -TERM $$"));
+    assert_eq!(artifact.status, Status::Failed);
+    assert_eq!(artifact.reason, "killed by signal 15 (SIGTERM)");
+}
+
+#[test]
+fn a_denied_marker_outranks_a_crash() {
+    // A tool that crashes after printing that it lacks a privilege is reported as needing it.
+    let source = sh_source("tools/c.txt", "echo 'cannot access tables'; kill -KILL $$")
+        .denied_marker("cannot access tables")
+        .gate(Gate::Root);
+    let artifact = run_one(source);
+    assert_eq!(artifact.status, Status::Truncated);
+    assert_eq!(artifact.gate, Gate::Root);
+}
+
+#[test]
+fn an_outdir_command_killed_by_a_signal_names_the_signal() {
+    let artifact = run_one(outdir_source("xpu-smi/d/crashlog/", "kill -KILL $$"));
+    assert_eq!(artifact.status, Status::Failed);
+    assert_eq!(artifact.reason, "killed by signal 9 (SIGKILL)");
+}
+
+#[test]
+fn a_tool_that_times_out_skips_the_later_tools_of_its_group_but_not_the_host_group() {
+    let in_group = |rel: &str, script: &str| {
+        sh_source(rel, script).group("usermode").timeout(Duration::from_millis(200))
+    };
+    let started = Instant::now();
+    let out = run(vec![
+        in_group("tools/a.txt", "sleep 5"),
+        in_group("tools/b.txt", "echo b"),
+        sh_source("system/h1.txt", "sleep 5").timeout(Duration::from_millis(200)),
+        sh_source("system/h2.txt", "echo h2"),
+    ]);
+    assert!(started.elapsed() < Duration::from_secs(4));
+    assert_eq!(out.artifacts[0].status, Status::TimedOut);
+    assert_eq!(out.artifacts[1].status, Status::Skipped);
+    assert!(
+        out.artifacts[1].reason.starts_with("an earlier read in this group did not return"),
+        "{}",
+        out.artifacts[1].reason
+    );
+    // A timed-out host command leaves the shared host group alone.
+    assert_eq!(out.artifacts[2].status, Status::TimedOut);
+    assert_eq!(out.artifacts[3].status, Status::Collected);
+    assert_eq!(out.text("system/h2.txt"), "h2\n");
+}
+
+#[test]
+fn crash_reasons_name_common_signals() {
+    assert_eq!(crash_reason(139).as_deref(), Some("killed by signal 11 (SIGSEGV)"));
+    assert_eq!(crash_reason(134).as_deref(), Some("killed by signal 6 (SIGABRT)"));
+    assert_eq!(crash_reason(129).as_deref(), Some("killed by signal 1 (SIGHUP)"));
+    assert_eq!(crash_reason(168).as_deref(), Some("killed by signal 40"));
+    for ordinary in [0, 1, 2, 4, 127, 128, 193, 255, -1] {
+        assert_eq!(crash_reason(ordinary), None, "{ordinary}");
+    }
+}
+
+#[test]
 fn a_command_that_overruns_is_timed_out() {
     let started = Instant::now();
     let artifact = run_one(sh_source("tools/c.txt", "sleep 5").timeout(Duration::from_millis(200)));
@@ -602,7 +672,7 @@ fn command_output_is_redacted_and_json_is_parsed() {
     assert_eq!(json["hostname"], "<host>");
     assert_eq!(json["note"], "on <host>");
     assert_eq!(json["n"], 3);
-    // The reference's formatting: two-space indent and a final newline.
+    // Two-space indent and a final newline.
     assert!(out.text("xpu-smi/d.json").starts_with("{\n  \"hostname\""));
     assert!(out.text("xpu-smi/d.json").ends_with("}\n"));
 }

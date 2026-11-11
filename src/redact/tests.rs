@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Port of the reference's `redact_test.cpp`, plus regression and survivor tests.
+//! Tests of the redaction rules, the survivors and the JSON handling.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use serde_json::{Value, json};
@@ -258,7 +258,7 @@ fn ipv6() {
             ("addr fe80::1: up", "addr <ipv6>: up"),
             ("inet6 addr:fe80::1", "inet6 addr:<ipv6>"),
             ("::1", "<ipv6>"),
-            // an address at the end of a sentence.
+            // An address at the end of a sentence.
             ("connected to fe80::1.", "connected to <ipv6>."),
             ("peer 2001:db8::abcd.\n", "peer <ipv6>.\n"),
             ("::1.", "<ipv6>."),
@@ -464,7 +464,7 @@ fn values_that_must_survive() {
     }
 }
 
-/// the effective user under `sudo` is root; it must not rewrite kernel command lines,
+/// The effective user under `sudo` is root; it must not rewrite kernel command lines,
 /// lspci output or ownership listings, with every rule class active.
 #[test]
 fn root_user_name_does_not_rewrite_root_text() {
@@ -479,7 +479,7 @@ fn root_user_name_does_not_rewrite_root_text() {
     }
 }
 
-/// a hostname in angle brackets is still data; only our own token words are exempt.
+/// A hostname in angle brackets is still data; only our own token words are exempt.
 #[test]
 fn hostname_in_angle_brackets() {
     let rules = Rules::default();
@@ -496,9 +496,9 @@ fn hostname_in_angle_brackets() {
     }
 }
 
-/// an IPv6 address followed by a sentence-ending dot.
+/// An IPv6 address followed by a sentence-ending dot.
 #[test]
-fn ipv6_before_sentence_dot() {
+fn ipv6_before_a_sentence_dot() {
     assert_eq!(
         redact_with("Link-local address is fe80::1.", &ONLY_ADDRESSES),
         "Link-local address is <ipv6>."
@@ -506,6 +506,26 @@ fn ipv6_before_sentence_dot() {
     assert_eq!(redact_with("peer 2001:db8::abcd.\n", &ONLY_ADDRESSES), "peer <ipv6>.\n");
     // A dot followed by a digit is an IPv4 tail and must not leave anything behind.
     assert_eq!(redact_with("::ffff:192.0.2.3.", &ONLY_ADDRESSES), "<ipv6>.");
+}
+
+/// `0::/init.scope` is the unified cgroup hierarchy, not the address `0::`.
+#[test]
+fn cgroup_lines_are_not_addresses() {
+    for line in [
+        "0::/init.scope",
+        "/proc/1/cgroup: 0::/init.scope",
+        "0::/user.slice/user-1000.slice/session-3.scope\n",
+        "0::/",
+        "12:memory:/user.slice\n0::/system.slice/docker-abc.scope",
+    ] {
+        assert_eq!(redact_with(line, &ONLY_ADDRESSES), line, "{line}");
+        assert_eq!(redact(line), line, "{line}");
+    }
+    // Real addresses next to it are still redacted.
+    assert_eq!(redact_with("0::/x fe80::1 and 2001:db8::/32", &ONLY_ADDRESSES), "0::/x <ipv6> and <ipv6>/32");
+    // Without the slash it is an address.
+    assert_eq!(redact_with("addr 0::", &ONLY_ADDRESSES), "addr <ipv6>");
+    assert_eq!(redact_with("1::2", &ONLY_ADDRESSES), "<ipv6>");
 }
 
 #[test]
@@ -750,7 +770,7 @@ fn redact_json_key_variants() {
 }
 
 #[test]
-fn redact_json_bytes_formats_like_the_reference() {
+fn redact_json_bytes_uses_two_space_indent() {
     let input = br#"{"serial":"ABC","list":[1,2],"empty":{},"none":[],"path":"/home/kwan/x"}"#;
     let out = redact_json_bytes(input, &Rules::default(), &context());
     let expected = "{\n  \"serial\": \"<serial>\",\n  \"list\": [\n    1,\n    2\n  ],\n  \"empty\": {},\n  \
@@ -766,7 +786,7 @@ fn redact_json_bytes_accepts_bom_and_trailing_whitespace() {
     assert_eq!(out, b"{\n  \"hostname\": \"<host>\"\n}\n");
 }
 
-/// a `.json` artifact that does not parse falls back to text redaction.
+/// A `.json` artifact that does not parse falls back to text redaction.
 #[test]
 fn json_parse_failure_falls_back_to_text() {
     let broken = b"{\"serial_number\": \"ABC\", \"host\": 192.0.2.3, truncated";

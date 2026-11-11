@@ -11,8 +11,8 @@ use crate::units::Bytes;
 
 use super::system::{read_capped, read_small};
 use super::text::{
-    format_os_description, host_name_variants, parse_account_names, parse_pretty_name, redactable_user_names,
-    resolver_domains, trim, with_resolver_domains,
+    format_os_description, host_name_variants, parse_account_names, parse_machine_id, parse_pretty_name,
+    private_domains, redactable_user_names, resolver_domains, trim, with_resolver_domains,
 };
 
 /// The value of an environment variable, lossy; None when unset.
@@ -25,7 +25,7 @@ pub fn user_name_in(passwd: &str, uid: u32) -> Option<String> {
     parse_account_names(passwd, 2).into_iter().find(|(id, _)| *id == uid).map(|(_, name)| name)
 }
 
-/// The context from given host files and environment; pure so the edge cases are testable.
+/// The context from given host files and environment; pure so that it is testable.
 pub fn identity_from(
     proc_hostname: &str,
     proc_domainname: &str,
@@ -36,19 +36,38 @@ pub fn identity_from(
     logname: Option<&str>,
 ) -> redact::Context {
     let domains = resolver_domains(resolv_conf);
-    let hostnames =
+    let mut hostnames =
         with_resolver_domains(host_name_variants(proc_hostname, proc_hostname, proc_domainname), &domains);
+    // The site's own domain: `mirror.corp.example` in a repository line names the employer as well
+    // as the machine does.
+    for domain in private_domains(proc_hostname, &domains) {
+        if !hostnames.contains(&domain) {
+            hostnames.push(domain);
+        }
+    }
     let user_names = redactable_user_names(effective_uid, None, &[sudo_user, user, logname]);
     redact::Context { hostnames, user_names }
 }
 
+/// `context` with the machine id added to its host names, so that it is replaced like a host name.
+/// The id identifies the installation and appears in journal file paths (`/var/log/journal/<id>/`).
+pub fn with_machine_id(mut context: redact::Context, machine_id_file: &str) -> redact::Context {
+    if let Some(id) = parse_machine_id(machine_id_file)
+        && !context.hostnames.contains(&id)
+    {
+        context.hostnames.push(id);
+    }
+    context
+}
+
 /// This machine's names without any lookup; never blocks.
 ///
-/// Host names: the kernel host name, its short form, the NIS domain name and `<short>.<domain>` for
-/// each `search` or `domain` line of resolv.conf. User names: `SUDO_USER`, `USER` and `LOGNAME`;
+/// Host names: the kernel host name, its short form, the NIS domain name, `<short>.<domain>` for
+/// each `search` or `domain` line of resolv.conf, those domains and the domain of the host name
+/// themselves (unless public), and the machine id. User names: `SUDO_USER`, `USER` and `LOGNAME`;
 /// never `root`, `nobody` or a numeric name.
 pub fn local_identity_without_lookups() -> redact::Context {
-    identity_from(
+    let context = identity_from(
         &read_small("/proc/sys/kernel/hostname"),
         &read_small("/proc/sys/kernel/domainname"),
         &read_small("/etc/resolv.conf"),
@@ -56,7 +75,8 @@ pub fn local_identity_without_lookups() -> redact::Context {
         environment_name("SUDO_USER").as_deref(),
         environment_name("USER").as_deref(),
         environment_name("LOGNAME").as_deref(),
-    )
+    );
+    with_machine_id(context, &read_small("/etc/machine-id"))
 }
 
 /// This machine's names: [`local_identity_without_lookups`] plus the account names of the login

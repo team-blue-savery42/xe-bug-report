@@ -11,6 +11,7 @@ use std::time::Duration;
 use crate::bundle::source::Produced;
 use crate::procio::{ChildOutcome, run_child};
 use crate::redact::Context;
+use crate::sources::debug_keys::is_debug_key;
 use crate::units::Bytes;
 
 /// Same classes of variable as the Linux table, minus the loader variables: the compute and
@@ -53,13 +54,6 @@ const ENV_EXACT: &[&str] =
 
 /// The variable that makes the compute runtime read its debug keys.
 const DEBUG_KEYS_SWITCH: &str = "NEOREADDEBUGKEYS";
-/// The compute runtime's debug key names, one per line: a snapshot of the runtime's key list.
-/// Keys are read from variables with their plain names (`PrintDebugMessages`,
-/// `EnableDirectSubmission`, ...), or with a `NEO_OCL_`, `NEO_L0_` or `NEO_` prefix. Keys added
-/// by a newer runtime are not recorded.
-const DEBUG_KEY_NAMES: &str = include_str!("debug_keys.txt");
-/// The prefixes the compute runtime accepts before a debug key name, longest first.
-const DEBUG_KEY_PREFIXES: &[&str] = &["NEO_OCL_", "NEO_L0_", "NEO_"];
 /// Debug key values are cut at this many characters.
 const MAX_DEBUG_VALUE_CHARS: usize = 512;
 
@@ -152,18 +146,10 @@ pub fn wanted_environment_name(name: &str) -> bool {
     ENV_EXACT.contains(&upper.as_str()) || ENV_PREFIXES.iter().any(|p| upper.starts_with(p))
 }
 
-/// Whether `name` is a compute runtime debug key, bare or with a `NEO_OCL_`, `NEO_L0_` or `NEO_`
-/// prefix (any letter case).
-pub fn is_debug_key_name(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    let bare = DEBUG_KEY_PREFIXES.iter().find_map(|prefix| upper.strip_prefix(prefix)).unwrap_or(&upper);
-    !bare.is_empty() && DEBUG_KEY_NAMES.lines().any(|key| key.eq_ignore_ascii_case(bare))
-}
-
 /// Whether a variable is recorded while the debug-key switch is on: the switch itself and the
 /// debug keys. Nothing else is, so unrelated variables with secrets or names never appear.
 fn wanted_while_debug_keys_on(name: &str) -> bool {
-    name.eq_ignore_ascii_case(DEBUG_KEYS_SWITCH) || is_debug_key_name(name)
+    name.eq_ignore_ascii_case(DEBUG_KEYS_SWITCH) || is_debug_key(name)
 }
 
 /// Whether the debug-key switch is set to something other than empty or `0`.

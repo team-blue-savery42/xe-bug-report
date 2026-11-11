@@ -183,11 +183,10 @@ fn links_name_the_last_component_or_absent() {
 fn the_environment_builtin_filters_by_name() {
     let out = env_builtin("system/env.txt");
     let text = String::from_utf8_lossy(&out[0].data).into_owned();
-    for line in text.lines() {
+    for line in text.lines().filter(|l| !l.starts_with("# ")) {
         let key = line.split('=').next().unwrap();
         assert!(
-            key == "PATH"
-                || key == "LANG"
+            key == "LANG"
                 || key == "LC_ALL"
                 || key == "LD_PRELOAD"
                 || key == "LD_LIBRARY_PATH"
@@ -196,7 +195,71 @@ fn the_environment_builtin_filters_by_name() {
             "{key}"
         );
     }
-    assert!(!text.contains("HOME="));
+    assert!(!text.contains("HOME=") && !text.contains("\nPATH="));
+    // The tools are located instead of the whole PATH being copied.
+    assert!(text.contains("# xpu-smi: "), "{text}");
+    assert!(text.contains("# lspci: "));
+}
+
+#[test]
+fn gpu_mounts_keep_only_the_mounts_a_gpu_stack_needs_and_not_host_directories() {
+    let mountinfo = "22 1 8:2 / / rw - ext4 /dev/sda2 rw\n\
+        40 22 0:6 /dri /dev/dri rw - devtmpfs devtmpfs rw\n\
+        41 22 0:7 / /sys/kernel/debug rw - debugfs debugfs rw\n\
+        42 22 8:2 /firmware /lib/firmware ro - ext4 /dev/sda2 rw\n\
+        43 22 8:2 /home/alice/secret-project /home/dev/work rw - ext4 /dev/sda2 rw\n\
+        44 22 0:30 / /sys rw - sysfs sysfs rw\n\
+        45 22 0:31 / / rw - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/abc\n\
+        46 22 0:32 / /sys/fs/cgroup ro - cgroup2 cgroup rw\n\
+        47 22 8:2 /srv/data/acme /data rw - ext4 /dev/sda2 rw\n\
+        48 22 0:33 / /var/lib/docker/overlay2/abc123/merged rw - overlay overlay rw\n";
+    let mounts = gpu_mounts(mountinfo);
+    assert_eq!(
+        mounts,
+        [
+            "/dev/dri devtmpfs devtmpfs",
+            "/sys/kernel/debug debugfs debugfs",
+            "/lib/firmware ext4 /dev/sda2",
+            "/sys sysfs sysfs",
+            "/ overlay overlay",
+            "/sys/fs/cgroup cgroup2 cgroup",
+        ]
+    );
+    // No bind-mount root or host directory survives, and the overlay options (lower directories) are gone.
+    let all = mounts.join("\n");
+    assert!(
+        !all.contains("alice")
+            && !all.contains("acme")
+            && !all.contains("docker")
+            && !all.contains("/dri rw"),
+        "{all}"
+    );
+    assert!(gpu_mounts("").is_empty());
+    assert!(gpu_mounts("garbage without separator").is_empty());
+    let many: String = (0..100).map(|i| format!("{i} 1 0:1 / /dev/dri/{i} rw - tmpfs x rw\n")).collect();
+    assert_eq!(gpu_mounts(&many).len(), 40);
+}
+
+#[test]
+fn the_container_report_covers_namespaces_mounts_and_wsl() {
+    let reader = MapReader::new(&[
+        ("/proc/sys/kernel/osrelease", read_of("6.6.0-microsoft-standard-WSL2\n")),
+        (
+            "/proc/self/uid_map",
+            read_of("         0       1000          1\n         1     100000      65536\n"),
+        ),
+        ("/proc/self/mountinfo", read_of("40 22 0:6 /dri /dev/dri rw - devtmpfs devtmpfs rw\n")),
+    ]);
+    let out = container_builtin(&reader, "system/container.txt");
+    let text = String::from_utf8_lossy(&out[0].data).into_owned();
+    assert!(text.contains("kernel release names Microsoft (WSL): yes\n"), "{text}");
+    assert!(
+        text.contains("/proc/self/uid_map: 0       1000          1; 1     100000      65536\n"),
+        "{text}"
+    );
+    assert!(text.contains("/proc/self/gid_map: (absent)\n"));
+    assert!(text.contains("GPU-related mounts: \n  /dev/dri devtmpfs devtmpfs\n"), "{text}");
+    assert!(text.contains("/dev/dxg: ") && text.contains("/usr/lib/wsl: "));
 }
 
 #[test]
@@ -206,4 +269,28 @@ fn live_privilege_facts_are_consistent() {
     assert_eq!(has_sys_admin(), caps.is_some_and(Capabilities::sys_admin));
     let _ = any_render_node_accessible();
     let _ = current_privilege();
+}
+
+#[test]
+fn the_virtual_functions_of_a_physical_function_are_listed_in_numeric_order() {
+    let dir = PrivateTempDir::create("xe-bug-report-test-").unwrap();
+    let root = dir.path();
+    let functions = root.join("functions");
+    for (n, driver) in [(10u32, Some("vfio-pci")), (2, None), (1, Some("xe"))] {
+        let target = functions.join(format!("0000:03:00.{n}"));
+        fs::create_dir_all(&target).unwrap();
+        if let Some(driver) = driver {
+            std::os::unix::fs::symlink(format!("../../../bus/pci/drivers/{driver}"), target.join("driver"))
+                .unwrap();
+        }
+        std::os::unix::fs::symlink(&target, root.join(format!("virtfn{n}"))).unwrap();
+    }
+    fs::write(root.join("virtfn_note"), "x").unwrap();
+    assert_eq!(
+        virtual_functions(root),
+        "virtfn1: 0000:03:00.1, driver xe\nvirtfn2: 0000:03:00.2, driver none\nvirtfn10: 0000:03:00.10, driver vfio-pci\n"
+    );
+    assert_eq!(virtual_functions(&root.join("absent")), "");
+    let links = links_builtin("devices/x/links.txt", &root.to_string_lossy());
+    assert!(String::from_utf8_lossy(&links[0].data).contains("virtfn1: 0000:03:00.1, driver xe\n"));
 }

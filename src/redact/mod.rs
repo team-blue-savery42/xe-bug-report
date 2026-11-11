@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 //! Removes personal and machine identifiers from diagnostic text before it leaves the host.
-//! Port of `utility/redact/redact.cpp` of the reference.
 
 mod bytes;
 pub mod context;

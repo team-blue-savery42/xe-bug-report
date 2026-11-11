@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn the_version_line_is_the_one_that_says_version() {
-    // The reference build prints its version first.
+    // A build that prints its version first.
     assert_eq!(
         version_line("\n  \nxpu-smi version 2.3.0 (x)\nBuild:\n").unwrap(),
         "xpu-smi version 2.3.0 (x)"

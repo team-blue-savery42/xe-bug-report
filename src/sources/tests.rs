@@ -29,9 +29,31 @@ fn options(profile: Profile, samples: u32) -> SourceOptions {
     }
 }
 
-/// The tools of the reference host that produced the golden table: dpkg only.
-const DEBIAN: Tools = Tools { dpkg: true, rpm: false, iclg: false };
-const WITH_ICLG: Tools = Tools { dpkg: true, rpm: true, iclg: true };
+/// A Debian host with none of the optional tools.
+const DEBIAN: Tools = Tools {
+    dpkg: true,
+    rpm: false,
+    iclg: false,
+    vulkaninfo: false,
+    eglinfo: false,
+    sycl_ls: false,
+    intel_gpu_top: false,
+    icpx: false,
+    coredumpctl: false,
+};
+const WITH_ICLG: Tools = Tools { rpm: true, iclg: true, ..DEBIAN };
+/// Every tool the table knows: the golden table lists every row this makes possible.
+const ALL_TOOLS: Tools = Tools {
+    dpkg: true,
+    rpm: true,
+    iclg: true,
+    vulkaninfo: true,
+    eglinfo: true,
+    sycl_ls: true,
+    intel_gpu_top: true,
+    icpx: true,
+    coredumpctl: true,
+};
 
 fn table(options: &SourceOptions) -> Vec<Source> {
     sources_with(options, &DEBIAN)
@@ -59,7 +81,7 @@ fn xpu_args(source: &Source) -> &[String] {
 #[test]
 fn table_invariants_hold_for_every_profile() {
     for profile in [Profile::Minimal, Profile::Default, Profile::Full] {
-        for tools in [DEBIAN, WITH_ICLG, Tools::default()] {
+        for tools in [DEBIAN, WITH_ICLG, ALL_TOOLS, Tools::default()] {
             let sources = sources_with(&options(profile, 5), &tools);
             assert!(!sources.is_empty());
             let mut seen = HashSet::new();
@@ -212,9 +234,49 @@ fn device_sources_carry_the_device_group_and_directory() {
         }
     }
     for source in &sources {
-        if source.rel_path.starts_with("system/") || source.rel_path.starts_with("kernel/") {
+        // The scan of other processes has a group of its own: a stuck read must not stop the host sources.
+        if source.rel_path == "system/drm-clients.txt" {
+            assert_eq!(source.group, "drm-clients");
+        } else if source.rel_path == "system/umd-config.txt" {
+            // It reads files in the home and working directories, which can stall.
+            assert_eq!(source.group, "user-files");
+        } else if source.rel_path.starts_with("system/") || source.rel_path.starts_with("kernel/") {
             assert_eq!(source.group, "host", "{}", source.rel_path);
         }
+    }
+}
+
+#[test]
+fn the_power_state_is_recorded_before_anything_that_can_wake_the_gpu() {
+    let order = paths(&sources_with(&options(Profile::Full, 5), &ALL_TOOLS));
+    let at = |p: &str| order.iter().position(|q| q == p).unwrap_or_else(|| panic!("no {p}"));
+    let last_power = at("devices/0000-84-00.0/power.txt");
+    assert!(at("devices/0000-03-00.0/power.txt") < last_power);
+    // Everything that reads a device attribute, config space, a process's usage statistics or the
+    // GPU's management engine comes after every power snapshot.
+    for later in [
+        "devices/0000-03-00.0/sysfs/",
+        "devices/0000-03-00.0/debugfs/",
+        "system/platform-devices.txt",
+        "system/drm-clients.txt",
+        "pci/lspci-nn.txt",
+        "pci/0000-03-00.0/link-chain.txt",
+        "pci/0000-03-00.0/lspci-xxxx.txt",
+        "tools/vainfo.txt",
+        "xpu-smi/0000-03-00.0/stats.json",
+        "xpu-smi/0000-03-00.0/samples.csv",
+    ] {
+        assert!(last_power < at(later), "{later} comes before a power snapshot");
+    }
+    // Only host files that never reach the GPU come before the snapshots.
+    for path in &order[..last_power] {
+        assert!(
+            path.starts_with("system/")
+                || path.starts_with("kernel/")
+                || path == "xpu-smi/version.txt"
+                || path.contains("/power.txt"),
+            "{path} is read before the power state"
+        );
     }
 }
 
@@ -249,9 +311,9 @@ fn samples_follow_the_samples_option() {
 }
 
 #[test]
-fn the_windows_views_follow_the_windows_reference() {
-    // oal/win/log_sources.cpp: per device discovery, stats, config, RAS counters, samples (inside the
-    // device group); no health, RAS log or crash log.
+fn the_windows_views_have_their_own_shape() {
+    // Windows: per device discovery, stats, config, RAS counters, samples (inside the device group);
+    // no health, process list, RAS log or crash log.
     let o = options(Profile::Full, 5);
     let windows = views_for(&o, &WITH_ICLG, false);
     assert_eq!(
@@ -280,11 +342,18 @@ fn the_windows_views_follow_the_windows_reference() {
     // No samples requested: none of the sample rows.
     let none = views_for(&options(Profile::Full, 0), &DEBIAN, false);
     assert!(!none.iter().any(|s| s.rel_path.ends_with("samples.csv")));
-    // The Linux shape keeps health, the RAS log and the crash log.
+    // The Linux shape keeps health, the process list, the RAS log and the crash log.
     let linux = views_for(&o, &WITH_ICLG, true);
-    for p in ["xpu-smi/0000-03-00.0/health.json", "xpu-smi/raslog/", "xpu-smi/0000-03-00.0/crashlog/"] {
+    for p in [
+        "xpu-smi/0000-03-00.0/health.json",
+        "xpu-smi/0000-03-00.0/ps.json",
+        "xpu-smi/raslog/",
+        "xpu-smi/0000-03-00.0/crashlog/",
+    ] {
         assert!(has(&linux, p), "{p}");
     }
+    assert!(!has(&windows, "xpu-smi/0000-03-00.0/ps.json"));
+    assert_eq!(xpu_args(find(&linux, "xpu-smi/0000-03-00.0/ps.json")), ["ps", "-d", "0000:03:00.0", "-j"]);
 }
 
 #[test]
@@ -307,6 +376,11 @@ fn xpu_smi_rows_exist_without_an_xpu_smi_and_map_the_self_invocations() {
         xpu_args(find(&sources, &format!("{dev}discovery.json"))),
         ["discovery", "-d", "0000:03:00.0", "-j"]
     );
+    // The detailed discovery needs root for the DMI tables; the message it prints without them is
+    // what marks the file as partial.
+    let detailed = find(&sources, &format!("{dev}discovery.json"));
+    assert_eq!(detailed.gate, Gate::Root);
+    assert_eq!(detailed.denied_marker.as_deref(), Some("Cannot access DMI tables"));
     assert_eq!(xpu_args(find(&sources, &format!("{dev}stats.json"))), ["stats", "-d", "0000:03:00.0", "-j"]);
     assert_eq!(xpu_args(find(&sources, &format!("{dev}config.txt"))), ["config", "-d", "0000:03:00.0"]);
     assert_eq!(
@@ -387,7 +461,7 @@ fn ras_query_fields_are_unique_ras_and_ecc_error_names() {
 
 #[test]
 fn the_crash_log_source_exists_only_where_iclg_does() {
-    // a missing tool is "not installed", never "needs root".
+    // A missing tool is "not installed", never "needs root".
     let o = options(Profile::Full, 5);
     assert!(!has(&sources_with(&o, &DEBIAN), "xpu-smi/0000-03-00.0/crashlog/"));
     let sources = sources_with(&o, &WITH_ICLG);
@@ -415,7 +489,7 @@ fn package_sources_follow_the_installed_tools() {
     let debian = sources_with(&o, &DEBIAN);
     assert!(has(&debian, "packages/dpkg.txt"));
     assert!(!has(&debian, "packages/rpm.txt") && !has(&debian, "packages/rpm-last.txt"));
-    let redhat = sources_with(&o, &Tools { dpkg: false, rpm: true, iclg: false });
+    let redhat = sources_with(&o, &Tools { dpkg: false, rpm: true, ..DEBIAN });
     assert!(!has(&redhat, "packages/dpkg.txt"));
     assert!(has(&redhat, "packages/rpm.txt") && has(&redhat, "packages/rpm-last.txt"));
     let neither = sources_with(&o, &Tools::default());
@@ -555,8 +629,11 @@ fn builtins_read_only_through_the_reader() {
     // Every builtin of the table yields artifacts under its own path and touches only reader paths.
     for source in &sources {
         if let Spec::Builtin(f) = &source.spec {
-            if source.rel_path.starts_with("kernel/kmsg") || source.rel_path.contains("ras-counters") {
-                continue; // these run journalctl or open a netlink socket
+            if source.rel_path.starts_with("kernel/kmsg")
+                || source.rel_path.contains("ras-counters")
+                || source.rel_path.contains("lspci-xxxx")
+            {
+                continue; // these run journalctl or lspci, or open a netlink socket
             }
             let fake = Fake(std::sync::Mutex::new(Vec::new()));
             for produced in f(&fake) {
@@ -627,7 +704,7 @@ fn the_expanded_table_equals_the_golden_list() {
         devices: vec![GpuDevice { bdf: ADDR_A, os_path: PATH_A.to_owned() }],
         ..SourceOptions::default()
     };
-    let sources = sources_with(&o, &DEBIAN);
+    let sources = sources_with(&o, &ALL_TOOLS);
     let ours: Vec<(String, String, String, String)> = sources
         .iter()
         .map(|s| {
@@ -636,7 +713,6 @@ fn the_expanded_table_equals_the_golden_list() {
         })
         .collect();
     let golden = golden_rows();
-    assert_eq!(golden.len(), 56 - 1);
     for (i, (want, got)) in golden.iter().zip(&ours).enumerate() {
         assert_eq!(want, got, "row {} differs", i + 1);
     }

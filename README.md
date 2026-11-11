@@ -64,8 +64,10 @@ Linux:
 | Tool | From | Collects |
 |---|---|---|
 | `xpu-smi` | [Intel XPU Manager](https://github.com/intel/xpumanager) | `xpu-smi/` |
+| `iclg` | [Intel Crash Log](https://github.com/intel/crashlog) | `xpu-smi/<dev>/crashlog/` |
 | `lspci` | pciutils | `pci/` |
 | `journalctl` | systemd | the kernel log (`kernel/kmsg*.txt`) |
+| `coredumpctl` | systemd | `tools/coredumpctl.txt` |
 | `systemd-detect-virt` | systemd | `system/virt.txt`, `system/virt-container.txt` |
 | `modinfo` | kmod | `kernel/modinfo-*.txt` |
 | `dkms` | DKMS | `kernel/dkms.txt` |
@@ -74,6 +76,11 @@ Linux:
 | `rpm` | RPM | `packages/rpm*.txt` |
 | `clinfo` | [clinfo](https://github.com/Oblomov/clinfo) | `tools/clinfo*.txt` |
 | `vainfo` | [libva-utils](https://github.com/intel/libva-utils) | `tools/vainfo.txt` |
+| `vulkaninfo` | Vulkan-Tools | `tools/vulkaninfo.txt` |
+| `eglinfo` | Mesa demos | `tools/eglinfo.txt` |
+| `sycl-ls` | [Intel oneAPI DPC++](https://github.com/intel/llvm) | `tools/sycl-ls.txt` |
+| `icpx` | [Intel oneAPI DPC++](https://github.com/intel/llvm) | `tools/icpx-version.txt` |
+| `intel_gpu_top` | [igt-gpu-tools](https://gitlab.freedesktop.org/drm/igt-gpu-tools) | `tools/intel_gpu_top.txt` |
 
 Windows (all but `xpu-smi` ship with Windows):
 
@@ -235,7 +242,7 @@ The profile of a source is the smallest profile that includes it.
 |---|---|---|
 | `minimal` | `--minimal` | The essentials: versions, kernel log of the current boot, PCI identity and link state, device sysfs attributes, the package list, `xpu-smi` discovery. No samples. |
 | `default` | no flag | `minimal` plus host layout, previous-boot log, debugfs, PCI detail, per-device `xpu-smi` queries and samples. |
-| `full` | `--full` | `default` plus large or slow sources: the system log, `clinfo` and `vainfo` on Linux; `dxdiag` and the raw System event log on Windows. |
+| `full` | `--full` | `default` plus large or slow sources: the system log, the full `clinfo` dump and the memory limits on Linux; `dxdiag` and the raw System event log on Windows. |
 
 `--minimal` and `--full` cannot be combined. `--list` prints the sources the chosen options would
 collect.
@@ -265,14 +272,19 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | minimal | - | `system/uname.txt` | Kernel release and machine type. |
 | minimal | - | `system/cmdline` | Kernel command line. |
 | minimal | - | `system/modules` | Loaded kernel modules. |
-| default | - | `system/cpuinfo` | Host CPU, memory and interrupt layout. |
+| default | - | `system/cpuinfo` | Host CPU model and features, one block per kind of CPU. |
 | default | - | `system/meminfo` | Host CPU, memory and interrupt layout. |
 | default | - | `system/interrupts` | Host CPU, memory and interrupt layout. |
-| default | - | `system/iomem` | Host CPU, memory and interrupt layout. |
+| default | sys_admin | `system/iomem` | Host CPU, memory and interrupt layout. |
 | minimal | - | `system/env.txt` | Environment variables that change GPU runtime behaviour. |
 | minimal | - | `system/id.txt` | Which user, groups and capabilities the collection ran with. |
 | minimal | - | `system/container.txt` | Whether the collection ran inside a container. |
 | default | - | `system/virt.txt` | Virtualisation the host runs under. |
+| default | - | `system/virt-container.txt` | Container runtime the collection ran under. |
+| minimal | - | `system/state.txt` | Kernel taint flags, driver build, suspend counters and crash handling. |
+| full | - | `system/memory-limits.txt` | Memory pressure, huge pages and the locked memory limit. |
+| default | - | `system/icd.txt` | OpenCL, Vulkan and EGL drivers and layers the loaders will find. |
+| default | - | `system/umd-config.txt` | Driver configuration overrides and shader and compiler cache state. |
 | minimal | - | `system/security.txt` | Kernel and LSM settings that restrict GPU and log access. |
 | minimal | - | `system/dev-dri.txt` | Ownership and permissions of the GPU device nodes. |
 | minimal | - | `system/dmi.txt` | Platform vendor, model and BIOS version. |
@@ -282,36 +294,55 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | default | kernel_log | `kernel/kmsg-prev-boot.txt` | Kernel log of the previous boot, for crashes and hangs. |
 | minimal | - | `kernel/modinfo-xe.txt` | Version and parameters of the xe kernel driver. |
 | default | - | `kernel/modinfo-i915.txt` | Version and parameters of the i915 kernel driver. |
+| minimal | - | `kernel/config.txt` | Kernel build configuration for the GPU driver, debug checks and IOMMU. |
+| default | - | `kernel/modprobe-config.txt` | modprobe options and blacklists for the GPU modules, and the xe configfs state. |
 | default | - | `kernel/dkms.txt` | Out-of-tree kernel modules. |
 | default | - | `kernel/firmware.txt` | GPU firmware blobs installed on the host. |
 | default | root | `kernel/xe-parameters/` | Current xe driver module parameters. |
 | default | root | `kernel/drm-debug.txt` | DRM debug message mask. |
-| minimal | root | `devices/<dev>/sysfs/` | PCI, power, link, frequency and engine attributes from sysfs. |
-| minimal | - | `devices/<dev>/links.txt` | Driver binding, IOMMU group and parent function of the device. |
-| default | root | `devices/<dev>/debugfs/` | Driver internals: engines, topology, firmware state. |
+| minimal | - | `devices/<dev>/power.txt` | Runtime power state of the GPU and its bridges, read before anything wakes it. |
+| minimal | root | `devices/<dev>/sysfs/` | PCI, link, frequency, engine and SR-IOV attributes from sysfs. |
+| minimal | - | `devices/<dev>/links.txt` | Driver binding, IOMMU group, parent function and virtual functions of the device. |
+| minimal | - | `devices/<dev>/bars.txt` | BAR addresses and sizes, and the sizes a resizable BAR accepts. |
+| minimal | - | `devices/<dev>/iommu.txt` | IOMMU group, translation type and reserved regions of the device. |
+| default | - | `devices/<dev>/display.txt` | Display connectors with status, modes and a decoded EDID without serial number. |
+| default | root | `devices/<dev>/debugfs/` | Driver internals: engines, topology, firmware and GuC state, memory managers, display. |
 | minimal | root | `dumps/<dev>/` | Device coredumps the driver captured after a hang or crash. |
 | default | root | `dumps/<dev>/pmt-crashlog*.bin` | Raw firmware crash log regions of the platform telemetry interface. |
 | default | root | `dumps/<dev>/pmt-crashlog*.txt` | Identity and state of each firmware crash log region. |
 | minimal | root | `devices/<dev>/ras-counters.json` | Error counters of the device from the kernel's drm-ras interface. |
+| minimal | - | `system/platform-devices.txt` | Management engine firmware, flash partitions, telemetry regions and perf events. |
+| default | - | `system/power.txt` | Power supplies, platform profile, power limits, temperatures and CPU governor. |
+| default | root | `system/drm-clients.txt` | Processes that hold the GPU open and their memory and engine use. |
 | default | - | `pci/lspci-nn.txt` | PCI devices with numeric ids. |
 | default | - | `pci/lspci-tree.txt` | PCI topology as a tree. |
+| minimal | - | `pci/<dev>/link-chain.txt` | Link speed, width, error counters and power state of the GPU and every bridge above it. |
 | minimal | sys_admin | `pci/<dev>/lspci-vvv-<dev>.txt` | PCI capabilities, link state and errors of the GPU. |
 | default | sys_admin | `pci/<dev>/lspci-vvv-<bridge>.txt` | PCI capabilities and link state of an upstream bridge. |
-| default | sys_admin | `pci/<dev>/lspci-xxxx.txt` | Raw PCI configuration space, including extended capabilities. |
+| default | sys_admin | `pci/<dev>/lspci-xxxx.txt` | Raw PCI configuration space, including extended capabilities, without the serial number. |
 | minimal | - | `packages/dpkg.txt` | Installed GPU-related Debian packages. |
 | minimal | - | `packages/rpm.txt` | Installed GPU-related RPM packages. |
+| default | - | `packages/repositories.txt` | Package repositories the driver and libraries were installed from. |
 | default | - | `packages/dpkg-log.txt` | Recent Debian package installs and upgrades. |
 | default | - | `packages/apt-history.log` | Recent apt transactions. |
 | default | - | `packages/rpm-last.txt` | RPM packages by install time. |
 | full | kernel_log | `system/syslog` | Host system log. |
 | full | device_access | `tools/clinfo.txt` | OpenCL platforms and devices. |
-| full | device_access | `tools/vainfo.txt` | Video acceleration capabilities. |
+| default | device_access | `tools/clinfo-list.txt` | OpenCL platforms and devices, one line each. |
+| default | device_access | `tools/vainfo.txt` | Video acceleration driver, version and supported profiles. |
+| default | device_access | `tools/vulkaninfo.txt` | Vulkan loader, drivers and devices. |
+| default | device_access | `tools/eglinfo.txt` | EGL and OpenGL renderer and driver version per platform. |
+| default | device_access | `tools/sycl-ls.txt` | SYCL platforms and devices. |
+| default | device_access | `tools/intel_gpu_top.txt` | GPU devices and render nodes as the monitoring tool sees them. |
+| default | - | `tools/icpx-version.txt` | Compiler version. |
+| default | - | `tools/coredumpctl.txt` | Recent user-space crashes (time, process, signal, program name). |
 | minimal | device_access | `xpu-smi/discovery.json` | Devices as the driver reports them. |
 | default | device_access | `xpu-smi/topology.txt` | GPU, NIC and CPU affinity matrix. |
-| default | device_access | `xpu-smi/<dev>/discovery.json` | Detailed properties of the device. |
+| default | root | `xpu-smi/<dev>/discovery.json` | Detailed properties of the device. |
 | default | device_access | `xpu-smi/<dev>/stats.json` | Current power, temperature, clocks and memory. |
 | default | device_access | `xpu-smi/<dev>/config.txt` | Frequency, power, scheduler and standby settings. |
 | default | device_access | `xpu-smi/<dev>/health.json` | Component health status. |
+| default | device_access | `xpu-smi/<dev>/ps.json` | Processes using the device, as the driver reports them. |
 | default | device_access | `xpu-smi/<dev>/ras-counters.csv` | RAS error counters as the query fields report them. |
 | default | device_access | `xpu-smi/raslog/` | Hardware RAS error records (CPER) of all devices. |
 | default | root | `xpu-smi/<dev>/crashlog/` | Firmware crash log records. |
@@ -321,22 +352,112 @@ Notes on the Linux table:
 
 - `packages/rpm.txt` and `packages/rpm-last.txt` exist only where `rpm` is installed;
   `packages/dpkg.txt` only where `dpkg-query` is. A missing tool is "not installed", never "needs
-  root".
+  root". The same holds for the user-mode tools `vulkaninfo`, `eglinfo`, `sycl-ls`, `intel_gpu_top`,
+  `icpx` and `coredumpctl`: a row exists only where the tool is on PATH. `clinfo` and `vainfo` always
+  have a row.
 - `xpu-smi/<dev>/crashlog/` exists only where `iclg` is installed.
 - `xpu-smi/<dev>/samples.csv` is absent with `--minimal` or `--samples 0`.
 - With `--since` the previous-boot row is replaced: `kernel/kmsg.txt` covers the window across
   reboots.
+- `kernel/kmsg-extract.txt` (and `kernel/kmsg-prev-boot-extract.txt`) are written next to the kernel
+  logs from the same text: the GuC, HuC, DMC and GSC firmware lines, then the first 200 and the last
+  200 lines that report an error, warning, hang, reset, IOMMU or PCIe error, or a SIGID, each with two
+  lines of context. Read these first; a noisy boot cannot push the first error out of them. They are
+  entries of the kernel log sources and have no row of their own in `--list`.
 - `system/dmi-serials/` is an identifying source: it holds platform serial numbers and is skipped
   while redacting; use `--no-redact` to collect it.
+- `xpu-smi/<dev>/discovery.json` needs `root`: without it `xpu-smi` cannot read the DMI tables and
+  can crash. The row is then `truncated` with that gate; a child killed by a signal is `failed` and
+  the reason names the signal (for example `killed by signal 11 (SIGSEGV)`).
 - `xpu-smi/<dev>/ras-counters.csv` is skipped as "not supported by this xpu-smi build" while the installed
   `xpu-smi` does not know the `ras.*` and `ecc.errors.*` query fields; `xpu-smi/raslog/` likewise
   on an `xpu-smi` without that subcommand.
 - `devices/<dev>/ras-counters.json` is read from the kernel's `drm-ras` generic netlink interface
   (read only; counters are never cleared). It is skipped with "kernel has no drm-ras interface"
   where the kernel lacks it.
-- The `xpu-smi` queries run the `xpu-smi` executable as a child process with a time limit. Except
-  `version.txt` (no gate) and `crashlog/` (`root`), they are listed under `device_access` because
-  they need a render node.
+- `devices/<dev>/power.txt` is read before any other attribute of the device. Reading a frequency,
+  an idle residency or a temperature can wake a runtime-suspended GPU, after which its power state
+  would always read `active`; this file is the state the device was in.
+- `pci/<dev>/link-chain.txt` lists the link speed, width, error counters and power state of the GPU
+  and of every bridge up to the root port. The GPU often sits behind an on-board switch, so the
+  endpoint's own link files say little; the upstream port holds the link that was trained. A link
+  joins two ports (the GPU and the downstream port above it, the upstream port of the switch and the
+  root port), so the maximum shown is the lower of the two ports' maxima, and a link is marked only
+  when it trained below that. A GPU can lower its link at idle, so a marked link needs a loaded
+  sample before it is called a fault.
+- `devices/<dev>/bars.txt` decodes the BARs the kernel assigned and which sizes a resizable BAR
+  accepts (a BAR of 256 MiB on a GPU with more VRAM means resizable BAR or above-4G decoding is off).
+  `devices/<dev>/iommu.txt` gives the IOMMU group, its translation type (for example `DMA-FQ`), its
+  members and reserved regions.
+- `devices/<dev>/display.txt` lists the connectors of the GPU and, for each connected one, the mode
+  list and a decoded EDID. The EDID is decoded by the tool and only model-level fields are written
+  (manufacturer, product code, year, size, display name, supported timings, range limits, which
+  extensions it has). The monitor's serial number, the week of manufacture and free-text descriptors
+  are never copied.
+- `devices/<dev>/debugfs/` reads exact file names only: the engine, topology, firmware (`guc_info`,
+  `huc_info`, `gsc_info`, `guc_pc`), workaround, power gate, memory manager (`vram_mm`, `ggtt`,
+  `gtt_mm`, `stolen_mm`) and display state (`i915_*_status`, `i915_display_info`, `i915_vbt`) files,
+  looked for in the `gt*/` and `tile*/gt*/` layouts, and the GuC log last. A name the driver does not
+  have is skipped silently; if none exists the source says so. Anything that can change state when
+  opened, or write into the kernel log (`*force*`, `*reset*`, `*inject*`, `fail_*`, `*dmesg*`, `*lfd*`,
+  `forcewake_all`, `wedged_mode`), is never read, at any level.
+- `system/state.txt` records the kernel taint value with its flags spelled out (a `W` means a
+  warning already fired), the `xe` module build and state, the suspend counters (which device failed
+  an S3/S4 transition), `panic_on_warn`, `core_pattern` and whether devcoredump is disabled.
+  `kernel/config.txt` keeps the symbols of the running kernel's configuration that change how a report
+  reads (debug checks, devcoredump, IOMMU defaults, PCIe AER, lockdep, sanitizers), from
+  `/proc/config.gz` or `/boot/config-<release>`.
+- `kernel/modprobe-config.txt` shows the modprobe options and blacklists that mention `xe`, `i915`,
+  `drm` or `vfio`, and the `xe` configfs tree. This is how an unprivileged run learns that
+  `xe.force_probe`, `enable_psr` or `wedged_mode` were set, since most `xe` module parameters are
+  readable by root only.
+- `system/platform-devices.txt` lists the management engine devices with their firmware versions (the
+  `gscfi` one that belongs to the GPU gives the GSC firmware version without root), the GPU's flash
+  partitions, the telemetry regions with their `guid` and the perf events the driver registers
+  (names only; no event is opened). `system/power.txt` records power supplies, the platform profile,
+  package power limits, temperatures and the CPU governor; battery serial numbers and model names are
+  not read.
+- `packages/dpkg.txt` and `packages/rpm.txt` keep the GPU drivers and runtimes and the rest of the
+  graphics stack: Mesa, Vulkan, `libdrm`, the loaders, the kernel image, headers and firmware
+  packages, display servers and compositors, `qemu` and `libvirt`. `packages/repositories.txt` lists
+  the apt, yum and zypper repositories only (never keys), under neutral names `repo-1`, `repo-2`, ...
+  instead of file names; a repository line whose URL has credentials or looks like it carries a
+  token (a query string, a long token in the path) is withheld.
+- `system/icd.txt` lists the OpenCL, Vulkan and EGL driver and layer manifests the loaders search;
+  `system/umd-config.txt` shows `/etc/drirc`, `~/.drirc`, `igdrcl.config` of the current directory
+  and the state of the shader and compiler caches (names, sizes and times, not contents; the home
+  directory is written as `~`). It reads the home and working directories, which can sit on a
+  network file system, so it runs in a guard group of its own, and only regular files are read (a
+  FIFO, or a link to some other file, is reported as not a regular file).
+- `tools/vulkaninfo.txt`, `tools/eglinfo.txt`, `tools/clinfo-list.txt`, `tools/vainfo.txt` and the
+  other tool rows confirm which user-mode driver was actually loaded. They open the render node and
+  load the driver, so they run in a guard group of their own. A tool that runs into its time limit
+  skips the tools after it in that group, which most likely wait on the same stuck state; the
+  host sources are not affected. A tool that crashes (a Vulkan loader with two incompatible drivers
+  does) is recorded as `failed` with the signal; that is itself a finding.
+- `system/drm-clients.txt` lists the processes that hold a DRM device node open and the `drm-*`
+  usage lines of each (memory per region, engine time). Without root only the caller's own processes
+  can be listed, and the source is then `truncated` with `needs root`. Every read goes through the
+  guarded reader, and the scan stops after 5 seconds. `xpu-smi/<dev>/ps.json` is the unprivileged
+  view of the same question.
+- `system/iomem` needs `sys_admin`: without it the kernel prints every address as zero, so the
+  file would say nothing. `system/cpuinfo` prints one block per kind of CPU with the processors
+  that share it, not one per logical CPU. `system/env.txt` records where the diagnostic tools
+  resolve instead of copying `PATH`. It keeps a variable only when its prefix is one of the GPU
+  runtime ones and its name is not that of a credential, account, licence or network location; a
+  path-valued variable (`*_DIR`, `*_PATH`, `*_FILES`, `LD_LIBRARY_PATH`) is shown only when every
+  entry is in a system directory, else as `<path>`. With `NEOReadDebugKeys` set, the variables
+  named in the compute runtime's list of debug keys are recorded too, and no others.
+- `tools/coredumpctl.txt` lists recent user-space crashes (newest first) with the program name only,
+  not the executable's directory. `system/container.txt` lists only the mounts that matter to a GPU
+  stack (device nodes, firmware, loader directories, sysfs, devtmpfs, cgroup, overlay) as mount
+  point, type and source; the directory a bind mount comes from is not written. The `core_pattern`
+  in `system/state.txt` is shown only when it points into a system directory.
+- `system/memory-limits.txt` (`--full`) records memory pressure, transparent huge pages, the
+  mapping limit and the locked memory limit, which matter for unified shared memory and allocation
+  failures.
+- Child processes run with core dumps disabled, so a crashing tool never leaves a core file in the
+  current directory.
 
 ### Windows
 
@@ -349,16 +470,37 @@ Notes on the Linux table:
 | minimal | - | `system/id.txt` | invoking user, groups and privileges |
 | minimal | - | `system/wmi-video.txt` | display adapters as the WMI video controller class |
 | minimal | - | `system/wmi-display-drivers.txt` | installed display driver packages and their signatures |
+| default | - | `system/monitors.txt` | connected monitors: make, model, year and connector type, without serial numbers |
+| default | - | `system/power-sleep-states.txt` | available sleep states and why others are unavailable |
+| default | - | `system/power-scheme.txt` | the active power scheme |
+| default | - | `system/power-pcie.txt` | PCI Express link state power management settings |
+| default | elevated | `system/power-requests.txt` | what is keeping the display or system awake |
+| default | - | `system/gpu-counters.txt` | one sample of GPU engine utilisation and memory use per process |
+| default | - | `system/isolation.txt` | virtualization-based security, code integrity and hypervisor state |
+| default | elevated | `system/bcdedit.txt` | boot settings such as test signing and debug mode |
 | minimal | - | `devices/pnputil-devices.txt` | display devices, their problem status and driver candidates |
 | default | - | `devices/pnputil-drivers.txt` | display drivers in the driver store |
 | default | - | `devices/display-class-registry.txt` | display device class registry key |
+| default | - | `devices/directx-registry.txt` | DirectX adapters as DXGI sees them: driver version, memory, ids |
+| default | - | `devices/gpu-preference-registry.txt` | per-application GPU choice on systems with more than one GPU |
+| default | - | `devices/intel-igfx-registry-machine.txt` | compute-runtime debug keys set in the registry (read before the environment) |
+| default | - | `devices/intel-igfx-registry-user.txt` | compute-runtime debug keys set in the registry (read before the environment) |
+| default | - | `devices/khronos-icd.txt` | OpenCL and Vulkan drivers and layers the loaders find, with library versions |
 | minimal | - | `kernel/graphicsdrivers-registry.txt` | graphics kernel settings (TDR, scheduler) |
+| minimal | - | `kernel/crashcontrol-registry.txt` | whether a crash or watchdog dump can be written at all |
+| default | - | `kernel/localdumps-registry.txt` | where and how user-mode crash dumps are written |
 | minimal | - | `kernel/system-events.txt` | display, power and hardware-error events from the System log |
 | default | - | `kernel/application-events.txt` | application crash and error-reporting events |
+| default | - | `kernel/graphics-channel-events.txt` | events of the DxgKrnl, window manager and live dump channels found on this machine |
+| default | - | `kernel/etw-providers.txt` | registered tracing providers of Intel graphics, DxgKrnl and display components |
 | full | - | `kernel/` (`System.evtx`) | the System event log as a binary .evtx export |
 | default | - | `kernel/setupapi.dev.log` | device and driver installation log |
 | default | elevated | `dumps/listings.txt` | crash dump and GPU hang report files, listed but not copied |
+| default | elevated | `dumps/wer-kernel-reports.txt` | GPU hang and live kernel event report parameters (code, module, driver), without dumps |
+| default | - | `dumps/user-crashdumps.txt` | the invoking user's crash dump files, listed but not copied |
 | default | - | `packages/driverquery.csv` | all loaded drivers with versions and dates |
+| default | - | `packages/umd-versions.txt` | versions of the user-mode graphics, compute and media driver libraries |
+| default | - | `packages/intel-software.txt` | installed Intel graphics software and its version |
 | full | - | `tools/dxdiag/` | DirectX diagnostic report |
 | minimal | - | `xpu-smi/discovery.json` | xpu-smi device discovery |
 | default | - | `xpu-smi/topology.txt` | xpu-smi topology matrix |
@@ -375,15 +517,31 @@ Notes on the Windows table:
   `--no-redact`.
 - Output of `systeminfo`, `pnputil` and `wevtutil`, which print in the OEM code page when piped, is
   converted to UTF-8.
+- `system/env.txt` records `PATH` (it decides which `OpenCL.dll` or `vulkan-1.dll` loads first) and
+  the Level Zero, Mesa, Vulkan, OpenGL, OpenCL and media variables. While `NEOReadDebugKeys` is set
+  to something other than `0`, compute-runtime debug keys are recorded too, but only names on the
+  runtime's own debug-key list (bare or with a `NEO_OCL_`, `NEO_L0_` or `NEO_` prefix); values are
+  cut at 512 characters and nothing else in the environment is recorded.
+- `system/isolation.txt`: `Win32_DeviceGuard` answers only in an elevated prompt; the file says so
+  when it is empty. `system/gpu-counters.txt` uses localised counter names and works on English
+  Windows only.
+- `system/gpu-counters.txt` names the processes using the GPU, `dumps/user-crashdumps.txt` lists
+  executable names and `packages/intel-software.txt` installed Intel products; user paths and host
+  names in them are redacted.
+- `dumps/wer-kernel-reports.txt` keeps the report parameters (event type, bugcheck and live kernel
+  event codes, module and driver) of the newest kernel reports and drops user-interface text, loaded
+  module lists, application paths and the machine name; dumps are never copied.
 - The `health`, `raslog` and `crashlog` views, the coredumps, firmware crash logs and `drm-ras`
   counters exist on Linux only. GPUs are found with one PowerShell query of the PnP devices.
 
 ## Access required
 
 An ordinary user, with no group membership and no `sudo`, still collects most of the bundle: the
-operating system, kernel version and command line, the readable sysfs attributes of the GPU, the PCI
-listings, the package list, the kernel log where the system allows it, and, where the user may open a
-render node, the `xpu-smi` queries.
+operating system, kernel version, taint flags and command line, the kernel build configuration, the
+readable sysfs attributes of the GPU, the PCIe link chain and BAR layout, the GSC firmware version,
+the display connectors, the PCI listings, the package list and repositories, the kernel log where the
+system allows it, and, where the user may open a render node, the user-mode tools and the `xpu-smi`
+queries.
 
 Every source is attempted. A source that is denied is not an error: the archive is still written,
 the source is recorded in the manifest as `skipped` (or `truncated` when part of it was readable)
@@ -393,10 +551,10 @@ and the manifest `gate` entry use these five names:
 | Gate | Needs (exact text) | Covers |
 |---|---|---|
 | `kernel_log` | root, CAP_SYSLOG, membership of the 'adm' or 'systemd-journal' group, or sysctl kernel.dmesg_restrict=0 | `kernel/kmsg.txt`, `kernel/kmsg-prev-boot.txt`, `system/syslog` |
-| `device_access` | membership of the 'render' group, or root | the `xpu-smi` queries, `clinfo`, `vainfo` |
-| `root` | root | debugfs, coredumps, firmware crash logs, `drm-ras` counters, owner-only sysfs attributes, most `xe` module parameters, the `drm.debug` mask, DMI serial numbers, `iclg` crash logs |
-| `sys_admin` | root or CAP_SYS_ADMIN | PCI configuration space beyond the first 64 bytes: `lspci -vvv` link and AER detail, `lspci -xxxx` |
-| `elevated` | an elevated (Administrator) prompt | Windows: `dumps/listings.txt` |
+| `device_access` | membership of the 'render' group, or root | the `xpu-smi` queries, `clinfo`, `vainfo`, `vulkaninfo`, `eglinfo`, `sycl-ls`, `intel_gpu_top` |
+| `root` | root | debugfs, coredumps, firmware crash logs, `drm-ras` counters, owner-only sysfs attributes, most `xe` module parameters, the `drm.debug` mask, DMI serial numbers, `iclg` crash logs, the detailed `xpu-smi discovery` (DMI tables), other users' DRM clients |
+| `sys_admin` | root or CAP_SYS_ADMIN | PCI configuration space beyond the first 64 bytes: `lspci -vvv` link and AER detail, `lspci -xxxx`; `/proc/iomem` addresses |
+| `elevated` | an elevated (Administrator) prompt | Windows: `dumps/listings.txt`, `dumps/wer-kernel-reports.txt`, `system/power-requests.txt`, `system/bcdedit.txt` |
 
 The report prints one line per missing access with the text above (`needs root: 4 not collected,
 2 partial`) and ends with `Re-run with sudo for the full bundle.` (`Re-run from an elevated prompt for
@@ -425,7 +583,13 @@ kernel and event logs, device attributes and the `xpu-smi` output, all redacted 
 
 Never collected, with or without `--no-redact`:
 
-- monitor serial numbers (`system/monitors.txt` on Windows leaves it out);
+- the PCIe Device Serial Number, blanked as `xx` in `pci/<dev>/lspci-xxxx.txt`;
+- monitor serial numbers (the EDID in `devices/<dev>/display.txt` is decoded without it;
+  `system/monitors.txt` on Windows leaves it out);
+- battery serial numbers and model names;
+- repository keys, and repository URLs that carry credentials or look like they carry a token;
+- environment variables outside an allowlist of GPU runtime and locale variables (plus `PATH` on
+  Windows); on Linux, a name that looks like a credential is dropped even then;
 - Windows crash dumps: they are listed, not copied;
 - the user-interface text, module lists, application paths and machine name of WER reports.
 
@@ -442,6 +606,7 @@ Collected as written; review before sharing:
 - device coredumps (`dumps/<dev>/devcoredump-N.txt`): GPU engine and VM state, command stream
   snapshots, context images and the name and pid of the faulting process, as the driver wrote them
   (up to 32 MiB);
+- repository URLs in `packages/repositories.txt`: a private host name in one is not recognised;
 - any identifier a pattern misses, such as a host name inside a longer word. The manifest `identity`
   key is `partial` when the lookup of this machine's names timed out; a fully qualified name may
   then remain.
@@ -450,8 +615,10 @@ Matching rules:
 
 - Host and user names match as whole words, case-insensitively, longest first, also after `/home/`,
   `/Users/`, `\Users\` and in `USER=`, `USERNAME=` and `LOGNAME=` values. They come from the kernel,
-  the account files and `/etc/resolv.conf`; no DNS query is made. Percent-encoded separators (`%2F`)
-  count as word boundaries.
+  the account files and `/etc/resolv.conf`; no DNS query is made. The domains of those names are
+  replaced too, except public suffixes and well-known public services, so package repositories stay
+  readable; the machine id is replaced like a host name. Percent-encoded separators (`%2F`) count as
+  word boundaries.
 - Common account names (`root`, `nobody`, `daemon`, `system`, `administrator`, `localhost`, ...) are
   never replaced, so `root=LABEL=...` and `Root Port` stay intact.
 - Serials: values of `serial`, `serial number`, `serial_number`, `serialnumber` and `uuid` keys, and
@@ -476,13 +643,13 @@ xe-bug-report-20261110T163000Z.zip
                           ras-counters.csv  samples.csv  crashlog/
   system/    operating system, hardware and process environment
   kernel/    kernel log, driver modules and parameters, event logs
-  devices/   <dev>/ sysfs attributes, debugfs, drm-ras counters (Linux);
+  devices/   <dev>/ power state, sysfs attributes, BARs, IOMMU, display, debugfs, drm-ras counters (Linux);
              driver and device listings (Windows)
   pci/       lspci output per GPU and upstream bridge (Linux)
   dumps/     <dev>/ device coredumps and raw firmware crash logs (Linux);
              crash dump listings (Windows)
   packages/  installed GPU stack packages, or the driver list (Windows)
-  tools/     clinfo, vainfo, dxdiag (--full only)
+  tools/     clinfo, vainfo, vulkaninfo, eglinfo and the other user-mode tools (Linux); dxdiag (Windows, --full only)
 ```
 
 ## Manifest
@@ -643,11 +810,15 @@ A GPU problem often comes with a hung driver, and a hung read must not hang the 
 - Every file read runs on a helper thread with a limit (5 seconds). Every child process has a time
   limit of its own (10 seconds by default; longer for the slow sources) and is killed with its whole
   process group (Linux) or job object (Windows) at the limit.
-- Sources are grouped: the sources of one GPU form a group, all the others (host files, host
-  tools) form another. When one read in a group does not return in time, the helper is abandoned,
-  that source is recorded as `timed_out`, and the remaining sources of the group are skipped with
-  `an earlier read in this group did not return within 5 s` instead of hanging too. Sources of
-  other groups are collected normally.
+- Sources are grouped: the sources of one GPU form a group; on Linux the user-mode tools
+  (`vulkaninfo`, `eglinfo`, `clinfo`, `vainfo`, ...) form another, the scan for processes that hold
+  the GPU open a third and the reading of the user's home and working directory files a fourth,
+  because those open the render node, read driver statistics or may stall on a network file system;
+  all the others (host files, other host tools) form the last. When one read in a group does not
+  return in time, the helper is abandoned, that source is recorded as `timed_out`, and the remaining
+  sources of the group are skipped with `an earlier read in this group did not return within 5 s`
+  instead of hanging too. A child process that runs into its time limit does the same for its
+  group, except in the shared host group. Sources of other groups are collected normally.
 - `--timeout` bounds the whole run (default 600 seconds, `0` disables it). When it is reached, the
   remaining sources are recorded as `skipped` ("collector deadline reached") and the archive is still
   finished and written.

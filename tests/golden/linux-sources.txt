@@ -4,14 +4,19 @@ minimal  -              system/os-release                            Distributio
 minimal  -              system/uname.txt                             Kernel release and machine type.
 minimal  -              system/cmdline                               Kernel command line.
 minimal  -              system/modules                               Loaded kernel modules.
-default  -              system/cpuinfo                               Host CPU, memory and interrupt layout.
+default  -              system/cpuinfo                               Host CPU model and features, one block per kind of CPU.
 default  -              system/meminfo                               Host CPU, memory and interrupt layout.
 default  -              system/interrupts                            Host CPU, memory and interrupt layout.
-default  -              system/iomem                                 Host CPU, memory and interrupt layout.
+default  sys_admin      system/iomem                                 Host CPU, memory and interrupt layout.
 minimal  -              system/env.txt                               Environment variables that change GPU runtime behaviour.
 minimal  -              system/id.txt                                Which user, groups and capabilities the collection ran with.
 minimal  -              system/container.txt                         Whether the collection ran inside a container.
 default  -              system/virt.txt                              Virtualisation the host runs under.
+default  -              system/virt-container.txt                    Container runtime the collection ran under.
+minimal  -              system/state.txt                             Kernel taint flags, driver build, suspend counters and crash handling.
+full     -              system/memory-limits.txt                     Memory pressure, huge pages and the locked memory limit.
+default  -              system/icd.txt                               OpenCL, Vulkan and EGL drivers and layers the loaders will find.
+default  -              system/umd-config.txt                        Driver configuration overrides and shader and compiler cache state.
 minimal  -              system/security.txt                          Kernel and LSM settings that restrict GPU and log access.
 minimal  -              system/dev-dri.txt                           Ownership and permissions of the GPU device nodes.
 minimal  -              system/dmi.txt                               Platform vendor, model and BIOS version.
@@ -21,36 +26,58 @@ minimal  kernel_log     kernel/kmsg.txt                              Kernel log 
 default  kernel_log     kernel/kmsg-prev-boot.txt                    Kernel log of the previous boot, for crashes and hangs.
 minimal  -              kernel/modinfo-xe.txt                        Version and parameters of the xe kernel driver.
 default  -              kernel/modinfo-i915.txt                      Version and parameters of the i915 kernel driver.
+minimal  -              kernel/config.txt                            Kernel build configuration for the GPU driver, debug checks and IOMMU.
+default  -              kernel/modprobe-config.txt                   modprobe options and blacklists for the GPU modules, and the xe configfs state.
 default  -              kernel/dkms.txt                              Out-of-tree kernel modules.
 default  -              kernel/firmware.txt                          GPU firmware blobs installed on the host.
 default  root           kernel/xe-parameters/                        Current xe driver module parameters.
 default  root           kernel/drm-debug.txt                         DRM debug message mask.
-minimal  root           devices/0000-03-00.0/sysfs/                  PCI, power, link, frequency and engine attributes from sysfs.
-minimal  -              devices/0000-03-00.0/links.txt               Driver binding, IOMMU group and parent function of the device.
-default  root           devices/0000-03-00.0/debugfs/                Driver internals: engines, topology, firmware state.
+minimal  -              devices/0000-03-00.0/power.txt               Runtime power state of the GPU and its bridges, read before anything wakes it.
+minimal  root           devices/0000-03-00.0/sysfs/                  PCI, link, frequency, engine and SR-IOV attributes from sysfs.
+minimal  -              devices/0000-03-00.0/links.txt               Driver binding, IOMMU group, parent function and virtual functions of the device.
+minimal  -              devices/0000-03-00.0/bars.txt                BAR addresses and sizes, and the sizes a resizable BAR accepts.
+minimal  -              devices/0000-03-00.0/iommu.txt               IOMMU group, translation type and reserved regions of the device.
+default  -              devices/0000-03-00.0/display.txt             Display connectors with status, modes and a decoded EDID without serial number.
+default  root           devices/0000-03-00.0/debugfs/                Driver internals: engines, topology, firmware and GuC state, memory managers, display.
 minimal  root           dumps/0000-03-00.0/                          Device coredumps the driver captured after a hang or crash.
 default  root           dumps/0000-03-00.0/pmt-crashlog*.bin         Raw firmware crash log regions of the platform telemetry interface.
 default  root           dumps/0000-03-00.0/pmt-crashlog*.txt         Identity and state of each firmware crash log region.
 minimal  root           devices/0000-03-00.0/ras-counters.json       Error counters of the device from the kernel's drm-ras interface.
+minimal  -              system/platform-devices.txt                  Management engine firmware, flash partitions, telemetry regions and perf events.
+default  -              system/power.txt                             Power supplies, platform profile, power limits, temperatures and CPU governor.
+default  root           system/drm-clients.txt                       Processes that hold the GPU open and their memory and engine use.
 default  -              pci/lspci-nn.txt                             PCI devices with numeric ids.
 default  -              pci/lspci-tree.txt                           PCI topology as a tree.
+minimal  -              pci/0000-03-00.0/link-chain.txt              Link speed, width, error counters and power state of the GPU and every bridge above it.
 minimal  sys_admin      pci/0000-03-00.0/lspci-vvv-0000-03-00.0.txt  PCI capabilities, link state and errors of the GPU.
 default  sys_admin      pci/0000-03-00.0/lspci-vvv-0000-02-01.0.txt  PCI capabilities and link state of an upstream bridge.
 default  sys_admin      pci/0000-03-00.0/lspci-vvv-0000-01-00.0.txt  PCI capabilities and link state of an upstream bridge.
 default  sys_admin      pci/0000-03-00.0/lspci-vvv-0000-00-01.0.txt  PCI capabilities and link state of an upstream bridge.
-default  sys_admin      pci/0000-03-00.0/lspci-xxxx.txt              Raw PCI configuration space, including extended capabilities.
+default  sys_admin      pci/0000-03-00.0/lspci-xxxx.txt              Raw PCI configuration space, including extended capabilities, without the serial number.
 minimal  -              packages/dpkg.txt                            Installed GPU-related Debian packages.
+minimal  -              packages/rpm.txt                             Installed GPU-related RPM packages.
+default  -              packages/repositories.txt                    Package repositories the driver and libraries were installed from.
 default  -              packages/dpkg-log.txt                        Recent Debian package installs and upgrades.
 default  -              packages/apt-history.log                     Recent apt transactions.
+default  -              packages/rpm-last.txt                        RPM packages by install time.
 full     kernel_log     system/syslog                                Host system log.
 full     device_access  tools/clinfo.txt                             OpenCL platforms and devices.
-full     device_access  tools/vainfo.txt                             Video acceleration capabilities.
+default  device_access  tools/clinfo-list.txt                        OpenCL platforms and devices, one line each.
+default  device_access  tools/vainfo.txt                             Video acceleration driver, version and supported profiles.
+default  device_access  tools/vulkaninfo.txt                         Vulkan loader, drivers and devices.
+default  device_access  tools/eglinfo.txt                            EGL and OpenGL renderer and driver version per platform.
+default  device_access  tools/sycl-ls.txt                            SYCL platforms and devices.
+default  device_access  tools/intel_gpu_top.txt                      GPU devices and render nodes as the monitoring tool sees them.
+default  -              tools/icpx-version.txt                       Compiler version.
+default  -              tools/coredumpctl.txt                        Recent user-space crashes (time, process, signal, program name).
 minimal  device_access  xpu-smi/discovery.json                       Devices as the driver reports them.
 default  device_access  xpu-smi/topology.txt                         GPU, NIC and CPU affinity matrix.
-default  device_access  xpu-smi/0000-03-00.0/discovery.json          Detailed properties of the device.
+default  root           xpu-smi/0000-03-00.0/discovery.json          Detailed properties of the device.
 default  device_access  xpu-smi/0000-03-00.0/stats.json              Current power, temperature, clocks and memory.
 default  device_access  xpu-smi/0000-03-00.0/config.txt              Frequency, power, scheduler and standby settings.
 default  device_access  xpu-smi/0000-03-00.0/health.json             Component health status.
+default  device_access  xpu-smi/0000-03-00.0/ps.json                 Processes using the device, as the driver reports them.
 default  device_access  xpu-smi/0000-03-00.0/ras-counters.csv        RAS error counters as the query fields report them.
 default  device_access  xpu-smi/raslog/                              Hardware RAS error records (CPER) of all devices.
+default  root           xpu-smi/0000-03-00.0/crashlog/               Firmware crash log records.
 default  device_access  xpu-smi/0000-03-00.0/samples.csv             Metric samples taken one second apart.

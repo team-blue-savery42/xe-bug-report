@@ -69,7 +69,7 @@ fn journal_arguments() {
         |head: &[&str]| -> Vec<String> { head.iter().chain(tail.iter()).map(|s| (*s).to_owned()).collect() };
     assert_eq!(journal_argv(None, false), expect(&["journalctl", "-k", "-b", "0", "-n", &count]));
     assert_eq!(journal_argv(None, true), expect(&["journalctl", "-k", "-b", "-1", "-n", &count]));
-    // a window uses the transport match, because -k implies -b; it ignores the flag.
+    // A window uses the transport match, because -k implies -b; it ignores the flag.
     // It passes no -n, which makes journalctl scan the whole journal.
     let window = expect(&["journalctl", "_TRANSPORT=kernel", "--since=-30min"]);
     assert_eq!(journal_argv(Some(Duration::from_secs(30 * 60)), false), window);
@@ -194,20 +194,105 @@ fn environment_filter_keeps_gpu_runtime_variables_sorted() {
         "NEO_CACHE_DIR=/tmp/x",
         "container=docker",
         "SECRET_TOKEN=abc",
-        "LD_PRELOAD=/x.so",
+        "LD_PRELOAD=/usr/lib/x.so",
         "ZE_NOEQUALS",
         "XPU_SMI_DEBUG=1",
-        "INTEL_X=y",
+        "INTEL_DEBUG=perf",
         "LANGUAGE=en",
         "LANG=C",
+        "MESA_LOADER_DRIVER_OVERRIDE=iris",
+        "ANV_DEBUG=startup",
+        "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json",
+        "DRI_PRIME=1",
+        "EGL_PLATFORM=surfaceless",
+        "XDG_SESSION_TYPE=wayland",
+        "vblank_mode=0",
+        "CLASSPATH=/x",
+        "PrintDebugMessages=1",
     ]
     .map(str::to_owned)
     .to_vec();
     assert_eq!(
         filter_environment(&env),
-        "INTEL_X=y\nLANG=C\nLD_PRELOAD=/x.so\nNEO_CACHE_DIR=/tmp/x\nPATH=/usr/bin\nXPU_SMI_DEBUG=1\nZE_AFFINITY_MASK=0\ncontainer=docker\n"
+        "ANV_DEBUG=startup\nDRI_PRIME=1\nEGL_PLATFORM=surfaceless\nINTEL_DEBUG=perf\nLANG=C\nLD_PRELOAD=/usr/lib/x.so\n\
+         MESA_LOADER_DRIVER_OVERRIDE=iris\nNEO_CACHE_DIR=<path>\nVK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json\n\
+         XDG_SESSION_TYPE=wayland\nXPU_SMI_DEBUG=1\nZE_AFFINITY_MASK=0\ncontainer=docker\nvblank_mode=0\n"
     );
     assert!(filter_environment(&[]).is_empty());
+}
+
+#[test]
+fn generic_prefixes_and_secret_looking_names_are_not_recorded() {
+    let env: Vec<String> = [
+        "CL_API_TOKEN=abc123",
+        "INTEL_LICENSE_FILE=28518@lic.corp.example",
+        "MDA_CONFIG=1",
+        "ZE_API_KEY=k",
+        "SYCL_PROXY_URL=http://proxy.example.com:3128",
+        "ONEAPI_SERVER=build1",
+        "VK_LOGIN=me",
+        "UR_USER_NAME=alice",
+        "OCL_HOST_NAME=box",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    assert_eq!(filter_environment(&env), "");
+}
+
+#[test]
+fn path_values_are_kept_only_inside_system_directories() {
+    assert_eq!(
+        safe_path_value("/usr/lib:/opt/intel/oneapi/lib:/etc/x"),
+        "/usr/lib:/opt/intel/oneapi/lib:/etc/x"
+    );
+    assert_eq!(safe_path_value("/usr/lib:/data/alice/cache"), "<path>");
+    assert_eq!(safe_path_value("/srv/projects/secretproj/cache"), "<path>");
+    assert_eq!(safe_path_value("~/cache"), "~/cache");
+    assert_eq!(safe_path_value("/home/someone/lib"), "/home/someone/lib");
+    assert_eq!(safe_path_value(""), "");
+    let env: Vec<String> = [
+        "MESA_SHADER_CACHE_DIR=/data/alice/cache",
+        "SYCL_CACHE_DIR=/srv/projects/secretproj/cache",
+        "LD_LIBRARY_PATH=/opt/acme-corp/lib",
+        "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/a.json:/opt/acme/b.json",
+        "MESA_SHADER_CACHE_MAX_SIZE=1G",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    assert_eq!(
+        filter_environment(&env),
+        "LD_LIBRARY_PATH=<path>\nMESA_SHADER_CACHE_DIR=<path>\nMESA_SHADER_CACHE_MAX_SIZE=1G\nSYCL_CACHE_DIR=<path>\nVK_ICD_FILENAMES=<path>\n"
+    );
+}
+
+#[test]
+fn debug_keys_are_recorded_only_when_the_runtime_reads_them() {
+    let mut env: Vec<String> = [
+        "PrintDebugMessages=1",
+        "EnableDirectSubmission=0",
+        "HOME=/home/u",
+        "GithubPat=ghp_abc123",
+        "OpenAIKey=sk-zzz",
+        "AcmeCorpVpnUser=jsmith",
+        "MyEmployerProxy=http://proxy.acme.example:3128",
+        "NoDefaultCurrentDirectoryInExePath=1",
+        "APITOKEN=y",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    assert!(filter_environment(&env).is_empty());
+    // Set to 0 the runtime ignores the keys, so they are not recorded either.
+    env.push("NEOReadDebugKeys=0".to_owned());
+    assert_eq!(filter_environment(&env), "NEOReadDebugKeys=0\n");
+    env.pop();
+    env.push("NEOReadDebugKeys=1".to_owned());
+    let text = filter_environment(&env);
+    assert_eq!(text, "EnableDirectSubmission=0\nNEOReadDebugKeys=1\nPrintDebugMessages=1\n");
+    // A long value is cut.
+    env.push(format!("DumpKernels={}", "x".repeat(2000)));
+    let text = filter_environment(&env);
+    let line = text.lines().find(|l| l.starts_with("DumpKernels=")).unwrap();
+    assert_eq!(line.len(), "DumpKernels=".len() + 512);
 }
 
 #[test]
@@ -266,7 +351,7 @@ fn small_text_helpers() {
 
 #[test]
 fn resolver_domains_read_search_and_domain_lines() {
-    // the FQDN comes from resolv.conf, never from a DNS lookup.
+    // The FQDN comes from resolv.conf, never from a DNS lookup.
     let d = |s: &str| resolver_domains(s);
     assert_eq!(
         d("# comment\nnameserver 127.0.0.53\nsearch lab.example.com example.com.\n"),
@@ -281,6 +366,7 @@ fn resolver_domains_read_search_and_domain_lines() {
 
 #[test]
 fn redactable_user_names_exclude_privileged_and_numeric_accounts() {
+    // The effective user under sudo is root, which is never a name to redact.
     let n = |uid: u32, effective: Option<&str>, others: &[Option<&str>]| {
         redactable_user_names(uid, effective, others)
     };

@@ -8,7 +8,7 @@ use super::bytes::{TOKEN_HOST, TOKEN_SERIAL, TOKEN_UUID};
 use super::context::{Context, Rules};
 use super::rules::redact_text;
 
-/// Indent of a redacted `.json` artifact, in spaces (the reference dumps with indent 2).
+/// Indent of a redacted `.json` artifact, in spaces.
 pub const JSON_INDENT: usize = 2;
 
 /// The token that replaces the value under `key`, if its class is selected.
@@ -92,7 +92,7 @@ pub fn redact_json(mut value: Value, rules: &Rules, context: &Context) -> Value 
 }
 
 /// Redacts a `.json` artifact: parsed and walked with [`redact_json`], or text-redacted when it does
-/// not parse. A parsed document is re-serialised with the formatting the reference uses: two-space
+/// not parse. A parsed document is re-serialised with the formatting used throughout: two-space
 /// indent, key order kept, one trailing newline.
 pub fn redact_json_bytes(data: &[u8], rules: &Rules, context: &Context) -> Vec<u8> {
     let body = data.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(data);
