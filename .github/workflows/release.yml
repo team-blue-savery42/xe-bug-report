@@ -128,7 +128,7 @@ jobs:
       - run: rustup toolchain install
       - run: scripts/package.sh
       - run: target/release/xe-bug-report --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-${{ matrix.name }}
           path: ${{ matrix.files }}
@@ -150,14 +150,14 @@ jobs:
           chown -R builder "$GITHUB_WORKSPACE"
           su builder -c "git config --global --add safe.directory '$GITHUB_WORKSPACE' &&
               cd '$GITHUB_WORKSPACE' && scripts/package-arch.sh"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-arch
           path: |
             dist/*.pkg.tar.zst
             dist/*-source.tar.gz
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: aur
           path: dist/aur/
@@ -185,7 +185,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "stage/$name", dist | Out-Null
           Copy-Item target/release/xe-bug-report.exe, LICENSE, README.md -Destination "stage/$name"
           Compress-Archive -Path "stage/$name" -DestinationPath "dist/$name.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-windows
           path: dist/*.zip
