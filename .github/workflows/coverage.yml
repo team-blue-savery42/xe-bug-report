@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Line, function and region coverage of the test suite (cargo llvm-cov, Linux), shown in the run's
-# summary; the lcov file is kept as an artifact for a coverage service once the repository is public.
+# summary and uploaded to Codecov (authenticated with GitHub OIDC; no token is stored).
 name: coverage
 on:
   push:
@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  # Codecov verifies the upload with this workflow's OIDC token.
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: never
@@ -54,3 +56,10 @@ jobs:
           name: lcov
           path: lcov.info
           if-no-files-found: error
+      # Not fatal: a Codecov outage must not fail CI.
+      - uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false

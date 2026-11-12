@@ -44,7 +44,9 @@ shellcheck scripts/*.sh
 - The redaction timing test runs only in release builds:
   `cargo test --release --locked redact -- --ignored`.
 - Coverage: `cargo llvm-cov --all-features` (needs `llvm-tools-preview` and `cargo-llvm-cov`). CI
-  reports it in the run summary of `coverage.yml`.
+  reports it in the run summary of `coverage.yml` and on Codecov.
+- Static analysis: `quality.yml` runs SonarQube Cloud (Clippy rules, complexity, duplication), which
+  feeds the maintainability badge; settings are in `sonar-project.properties`.
 - The MSRV badge in `README.md` must match `rust-version`; a test checks it.
 
 ## Dependencies

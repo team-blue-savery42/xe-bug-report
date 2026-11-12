@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: MIT
+# Static analysis on SonarQube Cloud (Clippy rules, complexity, duplication), which feeds the
+# README rating badge. Separate from ci.yml, so an analysis service outage never blocks a release.
+name: quality
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, so new code is told apart from old.
+          fetch-depth: 0
+      - name: Skip without a token
+        if: env.SONAR_TOKEN == ''
+        run: echo "::notice::SONAR_TOKEN is not available (for example a pull request from a fork); no analysis"
+      # The analyzer runs Clippy itself, with the pinned toolchain.
+      - if: env.SONAR_TOKEN != ''
+        run: rustup toolchain install
+      - if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v8
