@@ -19,7 +19,7 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup component add llvm-tools-preview
       - run: cargo install --locked cargo-llvm-cov
       - run: cargo llvm-cov --locked --all-features --lcov --output-path lcov.info

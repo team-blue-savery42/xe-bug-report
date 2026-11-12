@@ -29,7 +29,7 @@ jobs:
       version: ${{ steps.check.outputs.version }}
       release: ${{ steps.check.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: check
@@ -114,7 +114,7 @@ jobs:
           else
               dnf install -y git gcc rpm-build binutils tar gzip findutils
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
@@ -142,7 +142,7 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - run: pacman -Syu --noconfirm --needed git rust
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # makepkg refuses to run as root.
       - name: Build the pacman package and the AUR files
         run: |
@@ -170,7 +170,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Tag locally so --version shows the release
         shell: bash
         run: |
@@ -199,7 +199,7 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Publish to crates.io
         run: |
           if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
