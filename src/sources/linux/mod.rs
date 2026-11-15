@@ -20,6 +20,7 @@ pub mod pcie;
 pub mod platform;
 pub mod pmt;
 pub mod probes;
+pub mod runtime;
 pub mod state;
 pub mod system;
 pub mod text;
@@ -287,7 +288,7 @@ fn system_sources() -> Vec<Source> {
     out.push(
         command(
             "system/ldconfig.txt",
-            &[sbin_tool("ldconfig"), "-p".to_owned()],
+            &ldconfig_argv(),
             Profile::Minimal,
             "Which GPU runtime libraries the loader can find.",
         )
@@ -314,7 +315,22 @@ fn system_sources() -> Vec<Source> {
             "libur_",
         ]),
     );
+    out.push(
+        builtin(
+            "system/gpu-runtime.txt",
+            |_| runtime::gpu_runtime("system/gpu-runtime.txt", &ldconfig_argv()),
+            Profile::Minimal,
+            "Exact compute runtime versions: ocloc and the files the GPU runtime libraries resolve to.",
+        )
+        .timeout(runtime::SOURCE_TIMEOUT),
+    );
     out
+}
+
+/// The loader cache listing, `ldconfig -p`, shared by `system/ldconfig.txt` and
+/// `system/gpu-runtime.txt`.
+fn ldconfig_argv() -> Vec<String> {
+    vec![sbin_tool("ldconfig"), "-p".to_owned()]
 }
 
 /// The kernel sources: kernel logs, driver versions, firmware and module parameters.

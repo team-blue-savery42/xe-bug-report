@@ -22,6 +22,7 @@ minimal  -              system/dev-dri.txt                           Ownership a
 minimal  -              system/dmi.txt                               Platform vendor, model and BIOS version.
 minimal  root           system/dmi-serials/                          Platform serial numbers and UUID; omitted while redacting.
 minimal  -              system/ldconfig.txt                          Which GPU runtime libraries the loader can find.
+minimal  -              system/gpu-runtime.txt                       Exact compute runtime versions: ocloc and the files the GPU runtime libraries resolve to.
 minimal  kernel_log     kernel/kmsg.txt                              Kernel log of the current boot, with driver and GPU messages.
 default  kernel_log     kernel/kmsg-prev-boot.txt                    Kernel log of the previous boot, for crashes and hangs.
 minimal  -              kernel/modinfo-xe.txt                        Version and parameters of the xe kernel driver.
