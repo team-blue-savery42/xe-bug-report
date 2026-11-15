@@ -83,7 +83,8 @@ Linux:
 | `systemd-detect-virt` | systemd | `system/virt.txt`, `system/virt-container.txt` |
 | `modinfo` | kmod | `kernel/modinfo-*.txt` |
 | `dkms` | DKMS | `kernel/dkms.txt` |
-| `ldconfig` | glibc | `system/ldconfig.txt` |
+| `ldconfig` | glibc | `system/ldconfig.txt`, `system/gpu-runtime.txt` |
+| `ocloc` | [Intel Graphics Compute Runtime](https://github.com/intel/compute-runtime) | `system/gpu-runtime.txt` |
 | `dpkg-query` | dpkg | `packages/dpkg.txt` |
 | `rpm` | RPM | `packages/rpm*.txt` |
 | `pacman` | pacman | `packages/pacman*.txt` |
@@ -336,6 +337,7 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | minimal | - | `system/dmi.txt` | Platform vendor, model and BIOS version. |
 | minimal | root | `system/dmi-serials/` | Platform serial numbers and UUID; omitted while redacting. |
 | minimal | - | `system/ldconfig.txt` | Which GPU runtime libraries the loader can find. |
+| minimal | - | `system/gpu-runtime.txt` | Exact compute runtime versions: ocloc and the files the GPU runtime libraries resolve to. |
 | minimal | kernel_log | `kernel/kmsg.txt` | Kernel log of the current boot, with driver and GPU messages. |
 | default | kernel_log | `kernel/kmsg-prev-boot.txt` | Kernel log of the previous boot, for crashes and hangs. |
 | minimal | - | `kernel/modinfo-xe.txt` | Version and parameters of the xe kernel driver. |
@@ -476,6 +478,15 @@ Notes on the Linux table:
   the pacman command lines that asked for them), the last 1 MiB of them. Arch names its kernel
   package `linux` (`linux-lts`, `linux-zen`, ...), which the filter cannot tell from every other
   package with `linux` in its name, so it is not kept; `system/uname.txt` names the running kernel.
+- `system/gpu-runtime.txt` records `ocloc --version` (the compute runtime release) and, for each
+  GPU runtime library in the loader cache (`libigc`, `libigdfcl`, `libiga64`, `libopencl-clang`,
+  `libze_intel_gpu`, `libze_loader`, `libze_validation_layer`, `libigdgmm`, `libOpenCL`), the path
+  the cache gives and the file it finally resolves to, whose name carries the library version
+  (`libze_loader.so.1.32.0`). This is what a process would load, which can differ from the package
+  list when a runtime was built from source or copied into `/usr/local` or `/opt`. IGC does not
+  record its release in `libigc.so` (its file name has only the soname version, such as
+  `libigc.so.2.41.0`), so the exact IGC release comes from the package lists. A missing `ocloc` is
+  noted in the file; the libraries are still listed.
 - `system/icd.txt` lists the OpenCL, Vulkan and EGL driver and layer manifests the loaders search;
   `system/umd-config.txt` shows `/etc/drirc`, `~/.drirc`, `igdrcl.config` of the current directory
   and the state of the shader and compiler caches (names, sizes and times, not contents; the home
