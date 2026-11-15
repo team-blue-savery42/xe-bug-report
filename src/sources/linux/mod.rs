@@ -20,6 +20,7 @@ pub mod pcie;
 pub mod platform;
 pub mod pmt;
 pub mod probes;
+pub mod process;
 pub mod runtime;
 pub mod state;
 pub mod system;
@@ -51,6 +52,8 @@ const TOOL_GROUP: &str = "usermode";
 const USER_FILES_GROUP: &str = "user-files";
 /// The guard group of the scan for processes that hold the GPU open.
 const CLIENTS_GROUP: &str = "drm-clients";
+/// Time a `--pid` source gets: up to a few hundred small reads of the process's `/proc` files.
+const PROCESS_TIMEOUT: Duration = Duration::from_secs(30);
 /// The root of sysfs.
 const SYSFS: &str = "/sys";
 /// Size cap of the host system log.
@@ -646,6 +649,30 @@ fn late_host_sources() -> Vec<Source> {
     ]
 }
 
+/// The `--pid` sources: one directory per process, read through a guard group of its own (its
+/// memory map lock can be held by a thread stuck in the driver).
+fn process_sources(options: &SourceOptions) -> Vec<Source> {
+    options
+        .pids
+        .iter()
+        .map(|&pid| {
+            let dir = format!("processes/{pid}/");
+            let path = dir.clone();
+            builtin(
+                &dir,
+                move |reader| {
+                    process::process_report(reader, &Path::new("/proc").join(pid.to_string()), &path)
+                },
+                Profile::Minimal,
+                "GPU libraries, GPU runtime environment and thread wait states of a process (--pid).",
+            )
+            .gate(Gate::Root)
+            .timeout(PROCESS_TIMEOUT)
+            .group(&format!("process:{pid}"))
+        })
+        .collect()
+}
+
 /// The lspci sources: the host listings and, per device, the device and its upstream bridges.
 fn pci_sources(options: &SourceOptions) -> Vec<Source> {
     let mut out = vec![
@@ -817,6 +844,7 @@ pub fn table(options: &SourceOptions, tools: &Tools) -> Vec<Source> {
     all.extend(kernel_sources(options));
     all.extend(device_sources(options));
     all.extend(late_host_sources());
+    all.extend(process_sources(options));
     all.extend(pci_sources(options));
     all.extend(packages::package_sources(tools));
     all.extend(tool_sources(options, tools));

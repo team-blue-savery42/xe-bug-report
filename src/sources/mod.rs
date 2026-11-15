@@ -403,6 +403,12 @@ pub fn gpus_from_os() -> Vec<GpuDevice> {
     }
 }
 
+/// Whether a process with this id is running (Linux: `/proc/<pid>` exists). Always false elsewhere,
+/// where `--pid` is refused before this is asked.
+pub fn process_exists(pid: u32) -> bool {
+    cfg!(target_os = "linux") && Path::new(&format!("/proc/{pid}")).exists()
+}
+
 /// This machine's host names and user names; may do name-service lookups.
 pub fn local_identity() -> redact::Context {
     #[cfg(target_os = "linux")]

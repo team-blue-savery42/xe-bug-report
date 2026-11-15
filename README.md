@@ -129,7 +129,7 @@ Collect GPU diagnostics into a redacted zip bundle
 
 Usage: xe-bug-report [--output <file>] [--device <bdf,...>] [--minimal | --full] [--samples <n>]
        [--since <duration>] [--no-redact] [--list] [--json] [--xpu-smi <path>] [--timeout <seconds>]
-       [--verbose]
+       [--pid <pid,...>] [--verbose]
        xe-bug-report --version | -v
        xe-bug-report --help | -h
 
@@ -145,6 +145,7 @@ Options:
       --json               Print the result as JSON
       --xpu-smi <path>     The xpu-smi executable (default: xpu-smi on PATH, then next to xe-bug-report)
       --timeout <seconds>  Seconds for the whole run (default: 600, 0 disables the deadline)
+      --pid <pid,...>      Processes to describe: GPU libraries mapped, GPU environment, thread states (Linux; comma-separated)
       --verbose            Log progress to stderr and list every source that was not collected completely
   -v, --version            Print the version and exit
   -h, --help               Print help
@@ -168,6 +169,9 @@ sudo xe-bug-report --since 30m
 
 # Show what would be collected, without collecting it.
 xe-bug-report --list --full
+
+# Also describe a process that uses the GPU (its loaded GPU libraries and thread states).
+xe-bug-report --pid 4242
 
 # Use an xpu-smi that is not on PATH; machine-readable result.
 xe-bug-report --xpu-smi /opt/intel/bin/xpu-smi --json
@@ -199,6 +203,14 @@ Details of the options:
 - `--xpu-smi` names the `xpu-smi` executable. The default is `xpu-smi` on PATH, then next to
   `xe-bug-report` itself. If none is found, every `xpu-smi/*` source is skipped with the reason
   `xpu-smi not found` and everything else is still collected.
+- `--pid` names processes to describe (Linux only; repeatable or comma-separated), for example the
+  application that hangs or crashes on the GPU. For each one `processes/<pid>/` holds `status.txt`
+  (command name, state, thread count, and the state and kernel wait channel of each thread, at most
+  256), `environment.txt` (its GPU runtime variables, by the same allowlist as `system/env.txt`) and
+  `libraries.txt` (the GPU runtime libraries mapped into it, from `/proc/<pid>/maps`). A process that
+  is not running is an error that names it. Another user's process needs root: its environment,
+  libraries and wait channels are then `skipped` with that reason, file by file. On Windows the
+  option is refused.
 - `--timeout` is the number of seconds for the whole run (default 600, `0` disables the deadline).
 - `--json` prints the result as JSON on stdout instead of the report (below), and nothing else: the
   per-access breakdown is then only in the manifest (`gate` and `reason`).
@@ -299,7 +311,7 @@ collect.
 | Code | Meaning |
 |---|---|
 | 0 | The archive was written, whatever was skipped. Also `--list`, `--help`, `--version`. |
-| 1 | Invalid arguments, a `--device` that is not present, an output file that already exists or cannot be created, or a write failure. Nothing was written. |
+| 1 | Invalid arguments, a `--device` that is not present, a `--pid` that is not running, an output file that already exists or cannot be created, or a write failure. Nothing was written. |
 | 124 | The backstop fired: the collection did not finish 60 seconds after the `--timeout` deadline. No archive is left behind. |
 
 ## What is collected
@@ -362,6 +374,7 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | minimal | - | `system/platform-devices.txt` | Management engine firmware, flash partitions, telemetry regions and perf events. |
 | default | - | `system/power.txt` | Power supplies, platform profile, power limits, temperatures and CPU governor. |
 | default | root | `system/drm-clients.txt` | Processes that hold the GPU open and their memory and engine use. |
+| minimal | root | `processes/<pid>/` | GPU libraries, GPU runtime environment and thread wait states of a process (--pid). |
 | default | - | `pci/lspci-nn.txt` | PCI devices with numeric ids. |
 | default | - | `pci/lspci-tree.txt` | PCI topology as a tree. |
 | minimal | - | `pci/<dev>/link-chain.txt` | Link speed, width, error counters and power state of the GPU and every bridge above it. |
@@ -504,6 +517,13 @@ Notes on the Linux table:
   can be listed, and the source is then `truncated` with `needs root`. Every read goes through the
   guarded reader, and the scan stops after 5 seconds. `xpu-smi/<dev>/ps.json` is the unprivileged
   view of the same question.
+- `processes/<pid>/` exists only for the processes named with `--pid`, whatever the profile. The
+  libraries listed are the compute runtime set of `system/gpu-runtime.txt` plus `libigdrcl`,
+  `libmesa*` and `libvulkan_intel*`; a path ending in ` (deleted)` is a library that was replaced on
+  disk after the process loaded it, so the process runs an older runtime than the one installed. A
+  thread in state `D` with a wait channel such as `dma_fence_default_wait` is waiting on the GPU.
+  The process's memory map lock can be held by a thread stuck in the driver, so `/proc/<pid>/maps`
+  and `environ` are read last, through a guard group of the process's own.
 - `system/iomem` needs `sys_admin`: without it the kernel prints every address as zero, so the
   file would say nothing. `system/cpuinfo` prints one block per kind of CPU with the processors
   that share it, not one per logical CPU. `system/env.txt` records where the diagnostic tools
@@ -616,7 +636,7 @@ and the manifest `gate` entry use these five names:
 |---|---|---|
 | `kernel_log` | root, CAP_SYSLOG, membership of the 'adm' or 'systemd-journal' group, or sysctl kernel.dmesg_restrict=0 | `kernel/kmsg.txt`, `kernel/kmsg-prev-boot.txt`, `system/syslog` |
 | `device_access` | membership of the 'render' group, or root | the `xpu-smi` queries, `clinfo`, `vainfo`, `vulkaninfo`, `eglinfo`, `sycl-ls`, `intel_gpu_top` |
-| `root` | root | debugfs, coredumps, firmware crash logs, `drm-ras` counters, owner-only sysfs attributes, most `xe` module parameters, the `drm.debug` mask, DMI serial numbers, `iclg` crash logs, the detailed `xpu-smi discovery` (DMI tables), other users' DRM clients |
+| `root` | root | debugfs, coredumps, firmware crash logs, `drm-ras` counters, owner-only sysfs attributes, most `xe` module parameters, the `drm.debug` mask, DMI serial numbers, `iclg` crash logs, the detailed `xpu-smi discovery` (DMI tables), other users' DRM clients, and the environment, libraries and wait channels of another user's `--pid` process (the process's own user can read them too) |
 | `sys_admin` | root or CAP_SYS_ADMIN | PCI configuration space beyond the first 64 bytes: `lspci -vvv` link and AER detail, `lspci -xxxx`; `/proc/iomem` addresses |
 | `elevated` | an elevated (Administrator) prompt | Windows: `dumps/listings.txt`, `dumps/wer-kernel-reports.txt`, `system/power-requests.txt`, `system/bcdedit.txt` |
 
@@ -653,7 +673,9 @@ Never collected, with or without `--no-redact`:
 - battery serial numbers and model names;
 - repository keys, and repository URLs that carry credentials or look like they carry a token;
 - environment variables outside an allowlist of GPU runtime and locale variables (plus `PATH` on
-  Windows); on Linux, a name that looks like a credential is dropped even then;
+  Windows); on Linux, a name that looks like a credential is dropped even then. The same allowlist
+  applies to the environment of a `--pid` process;
+- the command line of a `--pid` process: only its command name (`comm`) is recorded;
 - Windows crash dumps: they are listed, not copied;
 - the user-interface text, module lists, application paths and machine name of WER reports.
 
@@ -710,6 +732,7 @@ xe-bug-report-20261110T163000Z.zip
   devices/   <dev>/ power state, sysfs attributes, BARs, IOMMU, display, debugfs, drm-ras counters (Linux);
              driver and device listings (Windows)
   pci/       lspci output per GPU and upstream bridge (Linux)
+  processes/ <pid>/ status, GPU environment and GPU libraries of each --pid process (Linux)
   dumps/     <dev>/ device coredumps and raw firmware crash logs (Linux);
              crash dump listings (Windows)
   packages/  installed GPU stack packages, or the driver list (Windows)

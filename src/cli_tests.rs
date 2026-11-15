@@ -305,3 +305,39 @@ fn device_option_accepts_comma_lists() {
     let (message, _) = usage_message(&["--device", "0000:03:00.0,zz"]);
     assert!(message.starts_with("Invalid PCI address 'zz'"), "{message}");
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pid_option_accepts_comma_lists_and_repeats() {
+    assert_eq!(parse(&["--pid", "42"]).unwrap().pids, [42]);
+    assert_eq!(parse(&["--pid", "42, 7", "--pid", "42", "--pid=9"]).unwrap().pids, [42, 7, 9]);
+    assert_eq!(parse(&[]).unwrap().pids, Vec::<u32>::new());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pid_option_rejects_what_is_not_a_process_id() {
+    for bad in ["0", "+5", "abc", "", "1,,2", "4294967296", "1.5"] {
+        let (message, _) = usage_message(&["--pid", bad]);
+        assert!(message.starts_with("Invalid process id '"), "{bad}: {message}");
+        assert!(message.ends_with("' for --pid; expected a positive integer"), "{bad}: {message}");
+    }
+    let (message, _) = usage_message(&["--pid", "12,x"]);
+    assert_eq!(message, "Invalid process id 'x' for --pid; expected a positive integer");
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn pid_option_is_refused_off_linux() {
+    let (message, _) = usage_message(&["--pid", "42"]);
+    assert_eq!(message, "--pid is supported on Linux only");
+}
+
+#[test]
+fn a_process_that_is_not_running_is_named() {
+    assert!(check_processes(&[], |_| false).is_ok());
+    assert!(check_processes(&[1, 2], |_| true).is_ok());
+    let error = check_processes(&[1, 77, 88], |pid| pid == 1).unwrap_err();
+    assert!(matches!(error, Error::UnknownProcess(77)), "{error:?}");
+    assert_eq!(error.to_string(), "No process with id 77 is running on this system");
+}

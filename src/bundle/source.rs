@@ -381,6 +381,8 @@ pub struct SourceOptions {
     pub profile: Profile,
     /// Devices, already filtered by `--device`.
     pub devices: Vec<GpuDevice>,
+    /// Processes to describe (`--pid`), already checked to exist.
+    pub pids: Vec<u32>,
     /// `xpu-smi dump` samples per device, 1 s apart; 0 disables.
     pub samples: u32,
     /// Log window; None for the per-OS default.
