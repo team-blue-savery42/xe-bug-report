@@ -67,6 +67,7 @@ default  -              packages/pacman-log.txt                      Recent pacm
 full     kernel_log     system/syslog                                Host system log.
 full     device_access  tools/clinfo.txt                             OpenCL platforms and devices.
 default  device_access  tools/clinfo-list.txt                        OpenCL platforms and devices, one line each.
+default  device_access  tools/clinfo-limits.txt                      Largest single allocation and global memory size of each OpenCL device.
 default  device_access  tools/vainfo.txt                             Video acceleration driver, version and supported profiles.
 default  device_access  tools/vulkaninfo.txt                         Vulkan loader, drivers and devices.
 default  device_access  tools/eglinfo.txt                            EGL and OpenGL renderer and driver version per platform.

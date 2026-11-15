@@ -823,3 +823,26 @@ fn gpu_crash_reports_need_coredumpctl_and_the_full_profile() {
     assert!(!has(&sources_with(&options(Profile::Default, 5), &with), "tools/coredump-*.txt"));
     assert!(!has(&sources_with(&options(Profile::Full, 5), &DEBIAN), "tools/coredump-*.txt"));
 }
+
+#[test]
+fn the_allocation_limits_are_a_filtered_default_clinfo_query() {
+    let sources = table(&options(Profile::Default, 5));
+    let limits = find(&sources, "tools/clinfo-limits.txt");
+    assert_eq!(limits.gate, Gate::DeviceAccess);
+    let Spec::Command { argv } = &limits.spec else { panic!("not a command") };
+    assert_eq!(&argv[..2], ["clinfo", "--raw"]);
+    for property in ["CL_DEVICE_NAME", "CL_DEVICE_MAX_MEM_ALLOC_SIZE", "CL_DEVICE_GLOBAL_MEM_SIZE"] {
+        assert!(argv.iter().any(|a| a == property), "{property}");
+        assert!(limits.keep_lines.iter().any(|l| l == property), "{property}");
+    }
+    // A clinfo without --prop prints its whole raw listing; the filter keeps only these lines.
+    let raw = b"  CL_PLATFORM_NAME   Intel(R) OpenCL Graphics\n\
+[INTEL/0]  CL_DEVICE_NAME   Intel(R) Arc(TM) Pro B70 Graphics\n\
+[INTEL/0]  CL_DEVICE_GLOBAL_MEM_CACHE_SIZE   262144\n\
+[INTEL/0]  CL_DEVICE_GLOBAL_MEM_SIZE   32530182144\n\
+[INTEL/0]  CL_DEVICE_MAX_MEM_ALLOC_SIZE   32530182144\n\
+ignoring unknown command-line parameter --prop\n";
+    let kept = String::from_utf8(crate::bundle::collect::filter_lines(raw, &limits.keep_lines)).unwrap();
+    assert_eq!(kept.lines().count(), 4, "{kept}");
+    assert!(!kept.contains("CACHE") && !kept.contains("ignoring"), "{kept}");
+}
