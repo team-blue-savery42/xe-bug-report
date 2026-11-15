@@ -5,7 +5,7 @@
 # (.github/workflows/release.yml) sets pkgver and the checksum, builds the pacman package from
 # it and pushes it with .SRCINFO to the AUR.
 pkgname=xe-bug-report
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Standalone GPU diagnostic collector: writes a redacted zip bundle of logs, sysfs and tool output'
 arch=('x86_64')
