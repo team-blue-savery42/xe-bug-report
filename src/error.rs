@@ -15,6 +15,9 @@ pub enum Error {
     /// `--pid` named a process that is not running.
     #[error("No process with id {0} is running on this system")]
     UnknownProcess(u32),
+    /// `--attach` named a path that does not exist or cannot be inspected.
+    #[error("cannot attach {}: {reason}", path.display())]
+    MissingAttachment { path: PathBuf, reason: String },
     /// Something is already at the output path.
     #[error("{} already exists", .0.display())]
     OutputExists(PathBuf),

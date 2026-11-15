@@ -2,8 +2,10 @@
 //! The diagnostic sources of this OS, and the host facts they depend on.
 //!
 //! [`sources`] is the one table the collector, the manifest and `--list` share: the xpu-smi
-//! version row, the platform table, then the xpu-smi views, filtered by profile and in that order.
+//! version row, the platform table, the xpu-smi views, then the `--attach` attachments, filtered by
+//! profile and in that order.
 
+pub mod attach;
 pub mod debug_keys;
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -372,12 +374,13 @@ fn platform_table(options: &SourceOptions, tools: &Tools) -> Vec<Source> {
     }
 }
 
-/// [`sources`] for given host tools: version row, platform table, xpu-smi views, filtered by
-/// profile, in table order.
+/// [`sources`] for given host tools: version row, platform table, xpu-smi views, attachments,
+/// filtered by profile, in table order.
 pub fn sources_with(options: &SourceOptions, tools: &Tools) -> Vec<Source> {
     let mut all = vec![xpu_smi_version_source()];
     all.extend(platform_table(options, tools));
     all.extend(xpu_smi_views(options, tools));
+    all.extend(attach::attachment_sources(&options.attachments));
     all.retain(|source| source.profile <= options.profile);
     all
 }

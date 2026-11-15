@@ -129,7 +129,7 @@ Collect GPU diagnostics into a redacted zip bundle
 
 Usage: xe-bug-report [--output <file>] [--device <bdf,...>] [--minimal | --full] [--samples <n>]
        [--since <duration>] [--no-redact] [--list] [--json] [--xpu-smi <path>] [--timeout <seconds>]
-       [--pid <pid,...>] [--probe] [--verbose]
+       [--pid <pid,...>] [--probe] [--attach <path>]... [--verbose]
        xe-bug-report --version | -v
        xe-bug-report --help | -h
 
@@ -147,6 +147,7 @@ Options:
       --timeout <seconds>  Seconds for the whole run (default: 600, 0 disables the deadline)
       --pid <pid,...>      Processes to describe: GPU libraries mapped, GPU environment, thread states (Linux; comma-separated)
       --probe              Check that each GPU completes a small memory fill; submits work to the GPU (Linux)
+      --attach <path>      A file or directory to include under attachments/ (repeatable; text is redacted, binary files are not)
       --verbose            Log progress to stderr and list every source that was not collected completely
   -v, --version            Print the version and exit
   -h, --help               Print help
@@ -176,6 +177,9 @@ xe-bug-report --pid 4242
 
 # Check that each GPU still completes the work it accepts (submits a small fill; Linux).
 xe-bug-report --probe
+
+# Add a SPIR-V module and an IGC dump directory to the bundle.
+xe-bug-report --attach kernel.spv --attach ./igc-dumps
 
 # Use an xpu-smi that is not on PATH; machine-readable result.
 xe-bug-report --xpu-smi /opt/intel/bin/xpu-smi --json
@@ -223,6 +227,15 @@ Details of the options:
   or crashed, or `loader not found`. It is opt-in because it submits work to the GPU and loads the
   Level Zero driver; without `--probe` nothing is submitted. It needs access to a render node
   (`device_access`). See [Hang safety](#hang-safety-and-signals).
+- `--attach` adds a file or directory to the bundle as `attachments/<n>-<name>/` (`<n>` counts the
+  `--attach` options from 1; repeat the option for more). A directory is copied with its
+  subdirectories (16 levels deep). Only regular files are copied: symbolic links inside a directory
+  are listed as `skipped` and never followed, so nothing outside the given path is read, and FIFOs
+  and device nodes are never opened. A file over 16 MiB is skipped; all attachments together hold
+  at most 256 files and 64 MiB, and what does not fit is recorded with the reason. Text files (UTF-8
+  without NUL bytes) are redacted like every other text; anything else is stored as it is. Each
+  file has its own manifest entry. A path that does not exist is an error that names it. Works on
+  Linux and Windows.
 - `--timeout` is the number of seconds for the whole run (default 600, `0` disables the deadline).
 - `--json` prints the result as JSON on stdout instead of the report (below), and nothing else: the
   per-access breakdown is then only in the manifest (`gate` and `reason`).
@@ -323,7 +336,7 @@ collect.
 | Code | Meaning |
 |---|---|
 | 0 | The archive was written, whatever was skipped. Also `--list`, `--help`, `--version`. |
-| 1 | Invalid arguments, a `--device` that is not present, a `--pid` that is not running, an output file that already exists or cannot be created, or a write failure. Nothing was written. |
+| 1 | Invalid arguments, a `--device` that is not present, a `--pid` that is not running, an `--attach` path that does not exist, an output file that already exists or cannot be created, or a write failure. Nothing was written. |
 | 124 | The backstop fired: the collection did not finish 60 seconds after the `--timeout` deadline. No archive is left behind. |
 
 ## What is collected
@@ -424,6 +437,7 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | default | device_access | `xpu-smi/raslog/` | Hardware RAS error records (CPER) of all devices. |
 | default | root | `xpu-smi/<dev>/crashlog/` | Firmware crash log records. |
 | default | device_access | `xpu-smi/<dev>/samples.csv` | Metric samples taken one second apart. |
+| minimal | - | `attachments/<n>-<name>/` | A file or directory given with --attach; text is redacted, binary files are not. |
 
 Notes on the Linux table:
 
@@ -434,6 +448,8 @@ Notes on the Linux table:
   `icpx` and `coredumpctl`: a row exists only where the tool is on PATH. `clinfo` and `vainfo` always
   have a row.
 - `xpu-smi/<dev>/crashlog/` exists only where `iclg` is installed.
+- `attachments/<n>-<name>/` exists once per `--attach`, whatever the profile, last in the table (on
+  Windows as well).
 - `xpu-smi/<dev>/samples.csv` is absent with `--minimal` or `--samples 0`.
 - With `--since` the previous-boot row is replaced: `kernel/kmsg.txt` covers the window across
   reboots.
@@ -620,6 +636,7 @@ Notes on the Linux table:
 | default | - | `xpu-smi/<dev>/config.txt` | xpu-smi configuration of one device |
 | default | - | `xpu-smi/<dev>/ras-counters.csv` | xpu-smi RAS error counters of one device |
 | default | - | `xpu-smi/<dev>/samples.csv` | xpu-smi metric samples, one second apart |
+| minimal | - | `attachments/<n>-<name>/` | A file or directory given with --attach; text is redacted, binary files are not. |
 
 Notes on the Windows table:
 
@@ -721,6 +738,9 @@ Opt-in:
 
 Collected as written; review before sharing:
 
+- binary files given with `--attach` (anything that is not UTF-8 text without NUL bytes, such as a
+  SPIR-V module or a compiled kernel): stored as they are, never redacted. File and directory names
+  under `attachments/` are kept (characters outside `[A-Za-z0-9._-]` become `_`) and not redacted;
 - device coredumps (`dumps/<dev>/devcoredump-N.txt`): GPU engine and VM state, command stream
   snapshots, context images and the name and pid of the faulting process, as the driver wrote them
   (up to 32 MiB);
@@ -770,6 +790,7 @@ xe-bug-report-20261110T163000Z.zip
              crash dump listings (Windows)
   packages/  installed GPU stack packages, or the driver list (Windows)
   tools/     clinfo, vainfo, vulkaninfo, eglinfo and the other user-mode tools (Linux); dxdiag (Windows, --full only)
+  attachments/ <n>-<name>/ the files given with --attach
 ```
 
 ## Manifest

@@ -11,6 +11,8 @@ fn messages_name_the_subject() {
         "No Intel GPU with PCI address 0000:09:00.0 was found on this system"
     );
     assert_eq!(Error::UnknownProcess(4242).to_string(), "No process with id 4242 is running on this system");
+    let missing = Error::MissingAttachment { path: PathBuf::from("/x/k.spv"), reason: "No such file".into() };
+    assert_eq!(missing.to_string(), "cannot attach /x/k.spv: No such file");
     assert_eq!(Error::OutputExists(PathBuf::from("a.zip")).to_string(), "a.zip already exists");
     let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
     let text = Error::OutputUnwritable { path: PathBuf::from("/x/a.zip"), source: denied }.to_string();

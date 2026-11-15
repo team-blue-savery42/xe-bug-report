@@ -712,6 +712,7 @@ fn the_expanded_table_equals_the_golden_list() {
         devices: vec![GpuDevice { bdf: ADDR_A, os_path: PATH_A.to_owned() }],
         pids: vec![4242],
         probe: true,
+        attachments: vec![PathBuf::from("/tmp/kernel.spv")],
         ..SourceOptions::default()
     };
     let sources = sources_with(&o, &ALL_TOOLS);

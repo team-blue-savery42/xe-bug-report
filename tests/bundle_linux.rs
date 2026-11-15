@@ -135,6 +135,40 @@ fn a_named_process_of_the_same_user_is_described() {
     assert!(status.contains("threads (tid, state, wchan):\n"), "{status}");
 }
 
+#[test]
+fn an_attachment_that_does_not_exist_is_an_error_naming_it() {
+    let dir = common::temp_dir();
+    let missing = dir.path().join("no-such-kernel.spv");
+    let run = Invocation::new().args(["--json", "--attach"]).args([missing.as_os_str()]).run();
+    assert_eq!(run.code, 1, "{}{}", run.stdout, run.stderr);
+    let doc: Value = serde_json::from_str(&run.stdout).expect("valid JSON");
+    let error = doc["error"].as_str().unwrap();
+    assert!(error.starts_with("cannot attach ") && error.contains("no-such-kernel.spv"), "{error}");
+}
+
+#[test]
+fn attachments_are_bundled_text_redacted_and_binary_as_is() {
+    let src = common::temp_dir();
+    let dump = src.path().join("igc-dump");
+    std::fs::create_dir(&dump).unwrap();
+    std::fs::write(dump.join("build.log"), "built on 192.168.17.4\n").unwrap();
+    let binary = b"\x03\x02\x23\x07\0\x00192.168.17.4\0".to_vec();
+    std::fs::write(src.path().join("kernel.spv"), &binary).unwrap();
+    let out = common::temp_dir();
+    let (_, zip) = minimal_bundle(
+        out.path(),
+        &["--attach", src.path().join("kernel.spv").to_str().unwrap(), "--attach", dump.to_str().unwrap()],
+    );
+    assert_eq!(zip.read_named("attachments/1-kernel.spv/kernel.spv").unwrap(), binary);
+    let log = String::from_utf8(zip.read_named("attachments/2-igc-dump/build.log").unwrap()).unwrap();
+    assert_eq!(log, "built on <ipv4>\n");
+    let manifest = zip.manifest().unwrap();
+    for path in ["attachments/1-kernel.spv/kernel.spv", "attachments/2-igc-dump/build.log"] {
+        let row = sources_of(&manifest).iter().find(|s| s["path"] == path).expect("a manifest row");
+        assert_eq!(row["status"], "collected", "{row}");
+    }
+}
+
 // ---- --list ----
 
 fn golden_rows() -> Vec<ListRow> {

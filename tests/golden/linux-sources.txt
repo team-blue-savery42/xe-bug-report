@@ -87,3 +87,4 @@ default  device_access  xpu-smi/0000-03-00.0/ras-counters.csv        RAS error c
 default  device_access  xpu-smi/raslog/                              Hardware RAS error records (CPER) of all devices.
 default  root           xpu-smi/0000-03-00.0/crashlog/               Firmware crash log records.
 default  device_access  xpu-smi/0000-03-00.0/samples.csv             Metric samples taken one second apart.
+minimal  -              attachments/1-kernel.spv/                    A file or directory given with --attach; text is redacted, binary files are not.

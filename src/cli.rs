@@ -37,6 +37,8 @@ pub struct Args {
     pub pids: Vec<u32>,
     /// `--probe`: submit a small fill to each GPU and wait for it.
     pub probe: bool,
+    /// `--attach`: files and directories to include, in the typed order.
+    pub attachments: Vec<PathBuf>,
     /// `--minimal`, `--full` or the default.
     pub profile: Profile,
     /// `--samples` (0 with `--minimal`).
@@ -58,6 +60,7 @@ impl Default for Args {
             devices: Vec::new(),
             pids: Vec::new(),
             probe: false,
+            attachments: Vec::new(),
             profile: Profile::Default,
             samples: DEFAULT_SAMPLES,
             since: None,
@@ -94,7 +97,7 @@ fn command() -> Command {
         .override_usage(
             "xe-bug-report [--output <file>] [--device <bdf,...>] [--minimal | --full] [--samples <n>]\n       \
              [--since <duration>] [--no-redact] [--list] [--json] [--xpu-smi <path>] [--timeout <seconds>]\n       \
-             [--pid <pid,...>] [--probe] [--verbose]\n       \
+             [--pid <pid,...>] [--probe] [--attach <path>]... [--verbose]\n       \
              xe-bug-report --version | -v\n       \
              xe-bug-report --help | -h",
         )
@@ -183,6 +186,14 @@ fn command() -> Command {
                 .action(ArgAction::SetTrue)
                 .help("Check that each GPU completes a small memory fill; submits work to the GPU (Linux)"),
         )
+        .arg(
+            Arg::new("attach")
+                .long("attach")
+                .value_name("path")
+                .action(ArgAction::Append)
+                .value_parser(value_parser!(OsString))
+                .help("A file or directory to include under attachments/ (repeatable; text is redacted, binary files are not)"),
+        )
         .arg(Arg::new("verbose").long("verbose").action(ArgAction::SetTrue).help("Log progress to stderr and list every source that was not collected completely"))
         .arg(
             Arg::new("version")
@@ -256,6 +267,20 @@ pub fn check_processes(pids: &[u32], exists: impl Fn(u32) -> bool) -> Result<(),
     }
 }
 
+/// Fails with [`Error::MissingAttachment`] for the first of `paths` that `inspect` cannot find; it
+/// returns the error text for such a path.
+pub fn check_attachments(
+    paths: &[PathBuf],
+    inspect: impl Fn(&std::path::Path) -> Result<(), String>,
+) -> Result<(), Error> {
+    for path in paths {
+        if let Err(reason) = inspect(path) {
+            return Err(Error::MissingAttachment { path: path.clone(), reason });
+        }
+    }
+    Ok(())
+}
+
 /// Keeps the GPUs of `available` that `requested` names, in OS order; all of them when nothing is
 /// requested.
 ///
@@ -308,6 +333,11 @@ where
     if !pids.is_empty() && !cfg!(target_os = "linux") {
         return Err(usage("--pid is supported on Linux only".to_owned()));
     }
+    let attachments: Vec<PathBuf> =
+        matches.get_many::<OsString>("attach").into_iter().flatten().map(PathBuf::from).collect();
+    if attachments.iter().any(|path| path.as_os_str().is_empty()) {
+        return Err(usage("The --attach path can't be empty".to_owned()));
+    }
     let probe = matches.get_flag("probe");
     if probe && !cfg!(target_os = "linux") {
         return Err(usage("--probe is supported on Linux only".to_owned()));
@@ -344,6 +374,7 @@ where
         devices,
         pids,
         probe,
+        attachments,
         profile,
         samples,
         since,

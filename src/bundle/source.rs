@@ -89,6 +89,26 @@ pub enum Content {
     Text,
     /// Written as-is.
     Binary,
+    /// Decided per file by [`Content::of`]: text is redacted, anything else written as-is. For
+    /// files the tool did not choose (user attachments).
+    Detect,
+}
+
+impl Content {
+    /// What `data` is to be treated as: `Detect` becomes `Text` for UTF-8 without NUL bytes (an
+    /// incomplete sequence at the very end is allowed: a cut at a size cap), else `Binary`.
+    pub fn of(self, data: &[u8]) -> Content {
+        match self {
+            Content::Detect => {
+                let utf8 = match std::str::from_utf8(data) {
+                    Ok(_) => true,
+                    Err(error) => error.error_len().is_none(),
+                };
+                if utf8 && !data.contains(&0) { Content::Text } else { Content::Binary }
+            }
+            other => other,
+        }
+    }
 }
 
 /// Which end of an over-long file to keep.
@@ -238,7 +258,7 @@ pub struct Source {
     pub max_bytes: Bytes,
     /// Which end to keep; default Head.
     pub keep: Keep,
-    /// Text (redacted) or binary; default Text.
+    /// Text (redacted), binary or decided per file; default Text.
     pub content: Content,
     /// Binary that may hold personal data: skipped while redacting.
     pub identifying: bool,
@@ -335,6 +355,11 @@ impl Source {
         self.content = Content::Binary;
         self
     }
+    /// Decides text or binary per file ([`Content::Detect`]).
+    pub fn detect_content(mut self) -> Self {
+        self.content = Content::Detect;
+        self
+    }
     /// Marks it identifying: skipped while redacting.
     pub fn identifying(mut self) -> Self {
         self.identifying = true;
@@ -385,6 +410,8 @@ pub struct SourceOptions {
     pub pids: Vec<u32>,
     /// `--probe`: run the Level Zero liveness probe, which submits work to the GPU.
     pub probe: bool,
+    /// `--attach`: files and directories to include, already checked to exist.
+    pub attachments: Vec<PathBuf>,
     /// `xpu-smi dump` samples per device, 1 s apart; 0 disables.
     pub samples: u32,
     /// Log window; None for the per-OS default.
