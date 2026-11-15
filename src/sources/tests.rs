@@ -814,3 +814,11 @@ fn the_probe_runs_only_when_asked_last_of_the_host_sources() {
     let at = order.iter().position(|p| p == "devices/probe.txt").unwrap();
     assert!(order[at + 1..].iter().all(|p| p.starts_with("xpu-smi/")), "{order:?}");
 }
+
+#[test]
+fn gpu_crash_reports_need_coredumpctl_and_the_full_profile() {
+    let with = Tools { coredumpctl: true, ..DEBIAN };
+    assert!(has(&sources_with(&options(Profile::Full, 5), &with), "tools/coredump-*.txt"));
+    assert!(!has(&sources_with(&options(Profile::Default, 5), &with), "tools/coredump-*.txt"));
+    assert!(!has(&sources_with(&options(Profile::Full, 5), &DEBIAN), "tools/coredump-*.txt"));
+}

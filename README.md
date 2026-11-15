@@ -79,7 +79,7 @@ Linux:
 | `iclg` | [Intel Crash Log](https://github.com/intel/crashlog) | `xpu-smi/<dev>/crashlog/` |
 | `lspci` | pciutils | `pci/` |
 | `journalctl` | systemd | the kernel log (`kernel/kmsg*.txt`) |
-| `coredumpctl` | systemd | `tools/coredumpctl.txt` |
+| `coredumpctl` | systemd | `tools/coredumpctl.txt`, `tools/coredump-*.txt` |
 | `systemd-detect-virt` | systemd | `system/virt.txt`, `system/virt-container.txt` |
 | `modinfo` | kmod | `kernel/modinfo-*.txt` |
 | `dkms` | DKMS | `kernel/dkms.txt` |
@@ -313,7 +313,7 @@ The profile of a source is the smallest profile that includes it.
 |---|---|---|
 | `minimal` | `--minimal` | The essentials: versions, kernel log of the current boot, PCI identity and link state, device sysfs attributes, the package list, `xpu-smi` discovery. No samples. |
 | `default` | no flag | `minimal` plus host layout, previous-boot log, debugfs, PCI detail, per-device `xpu-smi` queries and samples. |
-| `full` | `--full` | `default` plus large or slow sources: the system log, the full `clinfo` dump and the memory limits on Linux; `dxdiag` and the raw System event log on Windows. |
+| `full` | `--full` | `default` plus large or slow sources: the system log, the full `clinfo` dump, the memory limits and the crash reports of GPU runtime crashes on Linux; `dxdiag` and the raw System event log on Windows. |
 
 `--minimal` and `--full` cannot be combined. `--list` prints the sources the chosen options would
 collect.
@@ -411,6 +411,7 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | default | device_access | `tools/intel_gpu_top.txt` | GPU devices and render nodes as the monitoring tool sees them. |
 | default | - | `tools/icpx-version.txt` | Compiler version. |
 | default | - | `tools/coredumpctl.txt` | Recent user-space crashes (time, process, signal, program name). |
+| full | - | `tools/coredump-*.txt` | Crash reports with stack traces of recent crashes in the GPU runtime libraries. |
 | minimal | device_access | `devices/probe.txt` | Whether each GPU completes a small memory fill (--probe; submits work to the GPU). |
 | minimal | device_access | `xpu-smi/discovery.json` | Devices as the driver reports them. |
 | default | device_access | `xpu-smi/topology.txt` | GPU, NIC and CPU affinity matrix. |
@@ -556,6 +557,13 @@ Notes on the Linux table:
   stack (device nodes, firmware, loader directories, sysfs, devtmpfs, cgroup, overlay) as mount
   point, type and source; the directory a bind mount comes from is not written. The `core_pattern`
   in `system/state.txt` is shown only when it points into a system directory.
+- `tools/coredump-<n>.txt` (`--full`, where `coredumpctl` is installed): of the 3 newest crashes in
+  the `coredumpctl list` window (`--since` applies), the crash reports (`coredumpctl info`) whose
+  stack trace has a frame in `libze_intel_gpu`, `libze_loader`, `libigc`, `libigdrcl`, `libOpenCL`
+  or `libigdfcl`. The stack traces are the ones systemd-coredump stored in the journal when the
+  process crashed; no core file is read. The command line is replaced by `(omitted)` and absolute
+  paths are cut to their last component, as in `tools/coredumpctl.txt`. When none of those crashes
+  is in the GPU runtime the source is `skipped` with that reason.
 - `system/memory-limits.txt` (`--full`) records memory pressure, transparent huge pages, the
   mapping limit and the locked memory limit, which matter for unified shared memory and allocation
   failures.
@@ -703,6 +711,11 @@ Opt-in:
 - `system/dmi-serials/` (Linux platform serial numbers): only with `--no-redact`, as root.
 - `kernel/System.evtx` (the raw Windows System log): only with `--full` and `--no-redact`.
 - `system/syslog` (the host system log, redacted like any text): only with `--full`.
+- `tools/coredump-<n>.txt` (crash reports of GPU runtime crashes): only with `--full`. They name the
+  crashed program, its systemd unit and control group, and the functions and libraries of its stack
+  frames; library and executable directories are cut to the file name, the command line is omitted
+  and the text is redacted like any other, but a function or unit name can still say what the
+  program was. Review before sharing.
 
 `--no-redact` turns all replacement off; the manifest `redaction` array is then empty.
 
