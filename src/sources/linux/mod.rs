@@ -62,6 +62,10 @@ const SYSFS: &str = "/sys";
 /// Size cap of the host system log.
 const SYSLOG_MAX: Bytes = Bytes::mib(8);
 
+/// The `clinfo --raw` properties of `tools/clinfo-limits.txt`.
+const CLINFO_LIMITS: &[&str] =
+    &["CL_PLATFORM_NAME", "CL_DEVICE_NAME", "CL_DEVICE_MAX_MEM_ALLOC_SIZE", "CL_DEVICE_GLOBAL_MEM_SIZE"];
+
 /// The sysfs attribute patterns of one device, verbatim. `*` matches within one path component.
 /// Nothing that can change state or leak the firmware image is on the list (no `config`, `rom`,
 /// `remove`, `rescan`, `reset`, `driver_override` or `resource*`). The runtime power attributes
@@ -774,6 +778,28 @@ fn tool_sources(options: &SourceOptions, tools: &Tools) -> Vec<Source> {
         Profile::Default,
         "OpenCL platforms and devices, one line each.",
     ));
+    // `--prop` queries only these properties; an older clinfo without it ignores the unknown option
+    // and prints the whole raw listing, which the line filter cuts to the same lines.
+    out.push(
+        tool_source(
+            "tools/clinfo-limits.txt",
+            &[
+                "clinfo",
+                "--raw",
+                "--prop",
+                "CL_PLATFORM_NAME",
+                "--prop",
+                "CL_DEVICE_NAME",
+                "--prop",
+                "CL_DEVICE_MAX_MEM_ALLOC_SIZE",
+                "--prop",
+                "CL_DEVICE_GLOBAL_MEM_SIZE",
+            ],
+            Profile::Default,
+            "Largest single allocation and global memory size of each OpenCL device.",
+        )
+        .keep_lines(CLINFO_LIMITS),
+    );
     out.push(tool_source(
         "tools/vainfo.txt",
         &["vainfo"],

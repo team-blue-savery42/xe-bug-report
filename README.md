@@ -417,6 +417,7 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | full | kernel_log | `system/syslog` | Host system log. |
 | full | device_access | `tools/clinfo.txt` | OpenCL platforms and devices. |
 | default | device_access | `tools/clinfo-list.txt` | OpenCL platforms and devices, one line each. |
+| default | device_access | `tools/clinfo-limits.txt` | Largest single allocation and global memory size of each OpenCL device. |
 | default | device_access | `tools/vainfo.txt` | Video acceleration driver, version and supported profiles. |
 | default | device_access | `tools/vulkaninfo.txt` | Vulkan loader, drivers and devices. |
 | default | device_access | `tools/eglinfo.txt` | EGL and OpenGL renderer and driver version per platform. |
@@ -536,6 +537,11 @@ Notes on the Linux table:
   directory is written as `~`). It reads the home and working directories, which can sit on a
   network file system, so it runs in a guard group of its own, and only regular files are read (a
   FIFO, or a link to some other file, is reported as not a regular file).
+- `tools/clinfo-limits.txt` records, per OpenCL platform and device, `CL_PLATFORM_NAME`,
+  `CL_DEVICE_NAME`, `CL_DEVICE_MAX_MEM_ALLOC_SIZE` (the largest single buffer the runtime allows,
+  often the first suspect when a large allocation fails) and `CL_DEVICE_GLOBAL_MEM_SIZE`, from
+  `clinfo --raw --prop ...`. An older `clinfo` without `--prop` ignores the option and prints the whole
+  raw listing; only those lines are kept. The full dump is `tools/clinfo.txt` (`--full`).
 - `tools/vulkaninfo.txt`, `tools/eglinfo.txt`, `tools/clinfo-list.txt`, `tools/vainfo.txt` and the
   other tool rows confirm which user-mode driver was actually loaded. They open the render node and
   load the driver, so they run in a guard group of their own. A tool that runs into its time limit
