@@ -47,6 +47,7 @@ minimal  root           devices/0000-03-00.0/ras-counters.json       Error count
 minimal  -              system/platform-devices.txt                  Management engine firmware, flash partitions, telemetry regions and perf events.
 default  -              system/power.txt                             Power supplies, platform profile, power limits, temperatures and CPU governor.
 default  root           system/drm-clients.txt                       Processes that hold the GPU open and their memory and engine use.
+minimal  root           processes/4242/                              GPU libraries, GPU runtime environment and thread wait states of a process (--pid).
 default  -              pci/lspci-nn.txt                             PCI devices with numeric ids.
 default  -              pci/lspci-tree.txt                           PCI topology as a tree.
 minimal  -              pci/0000-03-00.0/link-chain.txt              Link speed, width, error counters and power state of the GPU and every bridge above it.

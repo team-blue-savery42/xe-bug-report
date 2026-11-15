@@ -193,9 +193,13 @@ fn run(args: &Args) -> i32 {
         Ok(devices) => devices,
         Err(error) => return fail(args.json, &error.to_string()),
     };
+    if let Err(error) = cli::check_processes(&args.pids, sources::process_exists) {
+        return fail(args.json, &error.to_string());
+    }
     let options = SourceOptions {
         profile: args.profile,
         devices,
+        pids: args.pids.clone(),
         samples: args.samples,
         since: args.since,
         xpu_smi: resolve_xpu_smi(args.xpu_smi.as_deref()),

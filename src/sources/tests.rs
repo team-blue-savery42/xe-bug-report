@@ -710,6 +710,7 @@ fn the_expanded_table_equals_the_golden_list() {
         profile: Profile::Full,
         samples: 5,
         devices: vec![GpuDevice { bdf: ADDR_A, os_path: PATH_A.to_owned() }],
+        pids: vec![4242],
         ..SourceOptions::default()
     };
     let sources = sources_with(&o, &ALL_TOOLS);
@@ -778,4 +779,22 @@ fn live_builtins_print_this_host() {
             );
         }
     }
+}
+
+#[test]
+fn each_process_gets_a_guarded_directory_of_its_own() {
+    let none = table(&options(Profile::Full, 5));
+    assert!(!none.iter().any(|s| s.rel_path.starts_with("processes/")));
+    let o = SourceOptions { pids: vec![42, 7], ..options(Profile::Minimal, 0) };
+    let sources = table(&o);
+    for (pid, other) in [(42, 7), (7, 42)] {
+        let source = find(&sources, &format!("processes/{pid}/"));
+        assert_eq!(source.gate, Gate::Root);
+        assert_eq!(source.group, format!("process:{pid}"));
+        assert_ne!(source.group, format!("process:{other}"));
+        assert!(matches!(source.spec, Spec::Builtin(_)));
+    }
+    let order = paths(&sources);
+    let at = |p: &str| order.iter().position(|q| q == p).unwrap();
+    assert!(at("processes/42/") < at("processes/7/"));
 }

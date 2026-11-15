@@ -108,6 +108,33 @@ fn an_absent_device_is_an_error_naming_it() {
     assert!(doc["error"].as_str().is_some_and(|e| e.contains("ffff:ff:1f.7")), "{doc}");
 }
 
+#[test]
+fn a_process_that_is_not_running_is_an_error_naming_it() {
+    // Above the kernel's largest pid (2^22).
+    let run = common::run(["--pid", "4194305", "--json"]);
+    assert_eq!(run.code, 1, "{}{}", run.stdout, run.stderr);
+    let doc: Value = serde_json::from_str(&run.stdout).expect("valid JSON");
+    assert_eq!(doc["error"], "No process with id 4194305 is running on this system");
+}
+
+#[test]
+fn a_named_process_of_the_same_user_is_described() {
+    // The test process itself: same user, so every file is readable.
+    let pid = std::process::id().to_string();
+    let dir = common::temp_dir();
+    let (_, zip) = minimal_bundle(dir.path(), &["--pid", &pid]);
+    let manifest = zip.manifest().unwrap();
+    for file in ["status.txt", "environment.txt", "libraries.txt"] {
+        let path = format!("processes/{pid}/{file}");
+        let row = sources_of(&manifest).iter().find(|s| s["path"] == path.as_str());
+        let row = row.unwrap_or_else(|| panic!("{path} is not in the manifest"));
+        assert_eq!(row["status"], "collected", "{row}");
+    }
+    let status = String::from_utf8(zip.read_named(&format!("processes/{pid}/status.txt")).unwrap()).unwrap();
+    assert!(status.starts_with("comm: ") && status.contains("\nThreads: "), "{status}");
+    assert!(status.contains("threads (tid, state, wchan):\n"), "{status}");
+}
+
 // ---- --list ----
 
 fn golden_rows() -> Vec<ListRow> {

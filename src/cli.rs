@@ -33,6 +33,8 @@ pub struct Args {
     pub output: Option<PathBuf>,
     /// `--device`; empty for every GPU.
     pub devices: Vec<PciAddress>,
+    /// `--pid`: processes to describe, in the typed order without repeats.
+    pub pids: Vec<u32>,
     /// `--minimal`, `--full` or the default.
     pub profile: Profile,
     /// `--samples` (0 with `--minimal`).
@@ -52,6 +54,7 @@ impl Default for Args {
         Self {
             output: None,
             devices: Vec::new(),
+            pids: Vec::new(),
             profile: Profile::Default,
             samples: DEFAULT_SAMPLES,
             since: None,
@@ -88,7 +91,7 @@ fn command() -> Command {
         .override_usage(
             "xe-bug-report [--output <file>] [--device <bdf,...>] [--minimal | --full] [--samples <n>]\n       \
              [--since <duration>] [--no-redact] [--list] [--json] [--xpu-smi <path>] [--timeout <seconds>]\n       \
-             [--verbose]\n       \
+             [--pid <pid,...>] [--verbose]\n       \
              xe-bug-report --version | -v\n       \
              xe-bug-report --help | -h",
         )
@@ -164,6 +167,13 @@ fn command() -> Command {
                 .value_parser(value_parser!(u64).range(0..=MAX_TIMEOUT_SECS))
                 .help("Seconds for the whole run (default: 600, 0 disables the deadline)"),
         )
+        .arg(
+            Arg::new("pid")
+                .long("pid")
+                .value_name("pid,...")
+                .action(ArgAction::Append)
+                .help("Processes to describe: GPU libraries mapped, GPU environment, thread states (Linux; comma-separated)"),
+        )
         .arg(Arg::new("verbose").long("verbose").action(ArgAction::SetTrue).help("Log progress to stderr and list every source that was not collected completely"))
         .arg(
             Arg::new("version")
@@ -206,6 +216,35 @@ fn parse_devices<'a>(values: impl IntoIterator<Item = &'a str>) -> Result<Vec<Pc
         }
     }
     Ok(devices)
+}
+
+/// Parses every `--pid` value into process ids, dropping repeats and keeping the typed order.
+fn parse_pids<'a>(values: impl IntoIterator<Item = &'a str>) -> Result<Vec<u32>, String> {
+    let mut pids = Vec::new();
+    for value in values {
+        for item in split_device_list(value) {
+            // Digits only: `str::parse` would also accept a leading '+'.
+            let pid = Some(item)
+                .filter(|text| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
+                .and_then(|text| text.parse::<u32>().ok())
+                .filter(|pid| *pid > 0)
+                .ok_or_else(|| {
+                    format!("Invalid process id '{item}' for --pid; expected a positive integer")
+                })?;
+            if !pids.contains(&pid) {
+                pids.push(pid);
+            }
+        }
+    }
+    Ok(pids)
+}
+
+/// Fails with [`Error::UnknownProcess`] naming the first of `pids` for which `exists` is false.
+pub fn check_processes(pids: &[u32], exists: impl Fn(u32) -> bool) -> Result<(), Error> {
+    match pids.iter().find(|pid| !exists(**pid)) {
+        Some(missing) => Err(Error::UnknownProcess(*missing)),
+        None => Ok(()),
+    }
 }
 
 /// Keeps the GPUs of `available` that `requested` names, in OS order; all of them when nothing is
@@ -255,6 +294,12 @@ where
         parse_devices(matches.get_many::<String>("device").into_iter().flatten().map(String::as_str))
             .map_err(usage)?;
 
+    let pids = parse_pids(matches.get_many::<String>("pid").into_iter().flatten().map(String::as_str))
+        .map_err(usage)?;
+    if !pids.is_empty() && !cfg!(target_os = "linux") {
+        return Err(usage("--pid is supported on Linux only".to_owned()));
+    }
+
     let since = match matches.get_one::<String>("since") {
         None => None,
         Some(text) => Some(parse_since(text).ok_or_else(|| {
@@ -284,6 +329,7 @@ where
     Ok(Args {
         output,
         devices,
+        pids,
         profile,
         samples,
         since,

@@ -12,6 +12,9 @@ pub enum Error {
     /// `--device` named an address that is not on this system; the text is the address.
     #[error("No Intel GPU with PCI address {0} was found on this system")]
     UnknownDevice(String),
+    /// `--pid` named a process that is not running.
+    #[error("No process with id {0} is running on this system")]
+    UnknownProcess(u32),
     /// Something is already at the output path.
     #[error("{} already exists", .0.display())]
     OutputExists(PathBuf),
