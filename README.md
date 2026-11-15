@@ -86,6 +86,7 @@ Linux:
 | `ldconfig` | glibc | `system/ldconfig.txt` |
 | `dpkg-query` | dpkg | `packages/dpkg.txt` |
 | `rpm` | RPM | `packages/rpm*.txt` |
+| `pacman` | pacman | `packages/pacman*.txt` |
 | `clinfo` | [clinfo](https://github.com/Oblomov/clinfo) | `tools/clinfo*.txt` |
 | `vainfo` | [libva-utils](https://github.com/intel/libva-utils) | `tools/vainfo.txt` |
 | `vulkaninfo` | Vulkan-Tools | `tools/vulkaninfo.txt` |
@@ -367,10 +368,12 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | default | sys_admin | `pci/<dev>/lspci-xxxx.txt` | Raw PCI configuration space, including extended capabilities, without the serial number. |
 | minimal | - | `packages/dpkg.txt` | Installed GPU-related Debian packages. |
 | minimal | - | `packages/rpm.txt` | Installed GPU-related RPM packages. |
+| minimal | - | `packages/pacman.txt` | Installed GPU-related Arch Linux packages. |
 | default | - | `packages/repositories.txt` | Package repositories the driver and libraries were installed from. |
 | default | - | `packages/dpkg-log.txt` | Recent Debian package installs and upgrades. |
 | default | - | `packages/apt-history.log` | Recent apt transactions. |
 | default | - | `packages/rpm-last.txt` | RPM packages by install time. |
+| default | - | `packages/pacman-log.txt` | Recent pacman installs and upgrades of GPU-related packages. |
 | full | kernel_log | `system/syslog` | Host system log. |
 | full | device_access | `tools/clinfo.txt` | OpenCL platforms and devices. |
 | default | device_access | `tools/clinfo-list.txt` | OpenCL platforms and devices, one line each. |
@@ -396,7 +399,8 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 Notes on the Linux table:
 
 - `packages/rpm.txt` and `packages/rpm-last.txt` exist only where `rpm` is installed;
-  `packages/dpkg.txt` only where `dpkg-query` is. A missing tool is "not installed", never "needs
+  `packages/dpkg.txt` only where `dpkg-query` is; `packages/pacman.txt` and
+  `packages/pacman-log.txt` only where `pacman` is. A missing tool is "not installed", never "needs
   root". The same holds for the user-mode tools `vulkaninfo`, `eglinfo`, `sycl-ls`, `intel_gpu_top`,
   `icpx` and `coredumpctl`: a row exists only where the tool is on PATH. `clinfo` and `vainfo` always
   have a row.
@@ -462,12 +466,16 @@ Notes on the Linux table:
   (names only; no event is opened). `system/power.txt` records power supplies, the platform profile,
   package power limits, temperatures and the CPU governor; battery serial numbers and model names are
   not read.
-- `packages/dpkg.txt` and `packages/rpm.txt` keep the GPU drivers and runtimes and the rest of the
-  graphics stack: Mesa, Vulkan, `libdrm`, the loaders, the kernel image, headers and firmware
+- `packages/dpkg.txt`, `packages/rpm.txt` and `packages/pacman.txt` keep the GPU drivers and
+  runtimes and the rest of the graphics stack: Mesa, Vulkan, `libdrm`, the loaders, the kernel image, headers and firmware
   packages, display servers and compositors, `qemu` and `libvirt`. `packages/repositories.txt` lists
   the apt, yum and zypper repositories only (never keys), under neutral names `repo-1`, `repo-2`, ...
   instead of file names; a repository line whose URL has credentials or looks like it carries a
-  token (a query string, a long token in the path) is withheld.
+  token (a query string, a long token in the path) is withheld. `packages/pacman-log.txt` keeps the
+  lines of `/var/log/pacman.log` that name one of those packages (installs, upgrades, removals and
+  the pacman command lines that asked for them), the last 1 MiB of them. Arch names its kernel
+  package `linux` (`linux-lts`, `linux-zen`, ...), which the filter cannot tell from every other
+  package with `linux` in its name, so it is not kept; `system/uname.txt` names the running kernel.
 - `system/icd.txt` lists the OpenCL, Vulkan and EGL driver and layer manifests the loaders search;
   `system/umd-config.txt` shows `/etc/drirc`, `~/.drirc`, `igdrcl.config` of the current directory
   and the state of the shader and compiler caches (names, sizes and times, not contents; the home
