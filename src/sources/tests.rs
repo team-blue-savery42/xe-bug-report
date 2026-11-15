@@ -711,6 +711,7 @@ fn the_expanded_table_equals_the_golden_list() {
         samples: 5,
         devices: vec![GpuDevice { bdf: ADDR_A, os_path: PATH_A.to_owned() }],
         pids: vec![4242],
+        probe: true,
         ..SourceOptions::default()
     };
     let sources = sources_with(&o, &ALL_TOOLS);
@@ -797,4 +798,19 @@ fn each_process_gets_a_guarded_directory_of_its_own() {
     let order = paths(&sources);
     let at = |p: &str| order.iter().position(|q| q == p).unwrap();
     assert!(at("processes/42/") < at("processes/7/"));
+}
+
+#[test]
+fn the_probe_runs_only_when_asked_last_of_the_host_sources() {
+    assert!(!has(&table(&options(Profile::Full, 5)), "devices/probe.txt"));
+    let o = SourceOptions { probe: true, ..options(Profile::Minimal, 0) };
+    let sources = sources_with(&o, &ALL_TOOLS);
+    let probe = find(&sources, "devices/probe.txt");
+    assert_eq!(probe.gate, Gate::DeviceAccess);
+    assert!(probe.available.is_some());
+    assert_eq!(probe.group, "probe");
+    assert!(probe.timeout > linux::liveness::CHILD_DEADLINE);
+    let order = paths(&sources);
+    let at = order.iter().position(|p| p == "devices/probe.txt").unwrap();
+    assert!(order[at + 1..].iter().all(|p| p.starts_with("xpu-smi/")), "{order:?}");
 }

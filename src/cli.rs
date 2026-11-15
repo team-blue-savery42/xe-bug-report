@@ -35,6 +35,8 @@ pub struct Args {
     pub devices: Vec<PciAddress>,
     /// `--pid`: processes to describe, in the typed order without repeats.
     pub pids: Vec<u32>,
+    /// `--probe`: submit a small fill to each GPU and wait for it.
+    pub probe: bool,
     /// `--minimal`, `--full` or the default.
     pub profile: Profile,
     /// `--samples` (0 with `--minimal`).
@@ -55,6 +57,7 @@ impl Default for Args {
             output: None,
             devices: Vec::new(),
             pids: Vec::new(),
+            probe: false,
             profile: Profile::Default,
             samples: DEFAULT_SAMPLES,
             since: None,
@@ -91,7 +94,7 @@ fn command() -> Command {
         .override_usage(
             "xe-bug-report [--output <file>] [--device <bdf,...>] [--minimal | --full] [--samples <n>]\n       \
              [--since <duration>] [--no-redact] [--list] [--json] [--xpu-smi <path>] [--timeout <seconds>]\n       \
-             [--pid <pid,...>] [--verbose]\n       \
+             [--pid <pid,...>] [--probe] [--verbose]\n       \
              xe-bug-report --version | -v\n       \
              xe-bug-report --help | -h",
         )
@@ -173,6 +176,12 @@ fn command() -> Command {
                 .value_name("pid,...")
                 .action(ArgAction::Append)
                 .help("Processes to describe: GPU libraries mapped, GPU environment, thread states (Linux; comma-separated)"),
+        )
+        .arg(
+            Arg::new("probe")
+                .long("probe")
+                .action(ArgAction::SetTrue)
+                .help("Check that each GPU completes a small memory fill; submits work to the GPU (Linux)"),
         )
         .arg(Arg::new("verbose").long("verbose").action(ArgAction::SetTrue).help("Log progress to stderr and list every source that was not collected completely"))
         .arg(
@@ -299,6 +308,10 @@ where
     if !pids.is_empty() && !cfg!(target_os = "linux") {
         return Err(usage("--pid is supported on Linux only".to_owned()));
     }
+    let probe = matches.get_flag("probe");
+    if probe && !cfg!(target_os = "linux") {
+        return Err(usage("--probe is supported on Linux only".to_owned()));
+    }
 
     let since = match matches.get_one::<String>("since") {
         None => None,
@@ -330,6 +343,7 @@ where
         output,
         devices,
         pids,
+        probe,
         profile,
         samples,
         since,

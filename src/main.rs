@@ -32,7 +32,20 @@ const ERROR_PREFIX: &str = "xe-bug-report: ";
 const ENUMERATION_LIMIT: Duration = Duration::from_secs(5);
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == xe_bug_report::sources::linux::liveness::CHILD_ARG)
+    {
+        probe_child();
+    }
     std::process::exit(real_main());
+}
+
+/// The `--probe` child (see `sources::linux::liveness`): writes its report to stdout and ends with
+/// `_exit`, so a driver whose exit handlers hang on a wedged GPU cannot keep it alive.
+#[cfg(target_os = "linux")]
+fn probe_child() -> ! {
+    let code = xe_bug_report::sources::linux::liveness::child_main(&mut std::io::stdout().lock());
+    xe_bug_report::sys::unix::exit_immediately(code)
 }
 
 /// Writes `text` to stdout; a closed pipe is not an error worth a panic.
@@ -200,6 +213,7 @@ fn run(args: &Args) -> i32 {
         profile: args.profile,
         devices,
         pids: args.pids.clone(),
+        probe: args.probe,
         samples: args.samples,
         since: args.since,
         xpu_smi: resolve_xpu_smi(args.xpu_smi.as_deref()),

@@ -74,6 +74,7 @@ default  device_access  tools/sycl-ls.txt                            SYCL platfo
 default  device_access  tools/intel_gpu_top.txt                      GPU devices and render nodes as the monitoring tool sees them.
 default  -              tools/icpx-version.txt                       Compiler version.
 default  -              tools/coredumpctl.txt                        Recent user-space crashes (time, process, signal, program name).
+minimal  device_access  devices/probe.txt                            Whether each GPU completes a small memory fill (--probe; submits work to the GPU).
 minimal  device_access  xpu-smi/discovery.json                       Devices as the driver reports them.
 default  device_access  xpu-smi/topology.txt                         GPU, NIC and CPU affinity matrix.
 default  root           xpu-smi/0000-03-00.0/discovery.json          Detailed properties of the device.

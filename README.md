@@ -129,7 +129,7 @@ Collect GPU diagnostics into a redacted zip bundle
 
 Usage: xe-bug-report [--output <file>] [--device <bdf,...>] [--minimal | --full] [--samples <n>]
        [--since <duration>] [--no-redact] [--list] [--json] [--xpu-smi <path>] [--timeout <seconds>]
-       [--pid <pid,...>] [--verbose]
+       [--pid <pid,...>] [--probe] [--verbose]
        xe-bug-report --version | -v
        xe-bug-report --help | -h
 
@@ -146,6 +146,7 @@ Options:
       --xpu-smi <path>     The xpu-smi executable (default: xpu-smi on PATH, then next to xe-bug-report)
       --timeout <seconds>  Seconds for the whole run (default: 600, 0 disables the deadline)
       --pid <pid,...>      Processes to describe: GPU libraries mapped, GPU environment, thread states (Linux; comma-separated)
+      --probe              Check that each GPU completes a small memory fill; submits work to the GPU (Linux)
       --verbose            Log progress to stderr and list every source that was not collected completely
   -v, --version            Print the version and exit
   -h, --help               Print help
@@ -172,6 +173,9 @@ xe-bug-report --list --full
 
 # Also describe a process that uses the GPU (its loaded GPU libraries and thread states).
 xe-bug-report --pid 4242
+
+# Check that each GPU still completes the work it accepts (submits a small fill; Linux).
+xe-bug-report --probe
 
 # Use an xpu-smi that is not on PATH; machine-readable result.
 xe-bug-report --xpu-smi /opt/intel/bin/xpu-smi --json
@@ -211,6 +215,14 @@ Details of the options:
   is not running is an error that names it. Another user's process needs root: its environment,
   libraries and wait channels are then `skipped` with that reason, file by file. On Windows the
   option is refused.
+- `--probe` checks that each GPU still completes the work it accepts (Linux only; refused on
+  Windows). It submits a 4 KiB memory fill to every Level Zero device and waits up to 5 seconds for
+  it, in a child process that is killed after 10 seconds; `devices/probe.txt` records the result per
+  device: `ok`, `TIMEOUT` (accepted but never completed, the state a GPU can be left in after a page
+  fault), the failing call and its `ZE_RESULT_*` code, the step the child was in when it was killed
+  or crashed, or `loader not found`. It is opt-in because it submits work to the GPU and loads the
+  Level Zero driver; without `--probe` nothing is submitted. It needs access to a render node
+  (`device_access`). See [Hang safety](#hang-safety-and-signals).
 - `--timeout` is the number of seconds for the whole run (default 600, `0` disables the deadline).
 - `--json` prints the result as JSON on stdout instead of the report (below), and nothing else: the
   per-access breakdown is then only in the manifest (`gate` and `reason`).
@@ -399,6 +411,7 @@ columns are the ones `--list` prints: `PROFILE`, `NEEDS` (the access gate, see
 | default | device_access | `tools/intel_gpu_top.txt` | GPU devices and render nodes as the monitoring tool sees them. |
 | default | - | `tools/icpx-version.txt` | Compiler version. |
 | default | - | `tools/coredumpctl.txt` | Recent user-space crashes (time, process, signal, program name). |
+| minimal | device_access | `devices/probe.txt` | Whether each GPU completes a small memory fill (--probe; submits work to the GPU). |
 | minimal | device_access | `xpu-smi/discovery.json` | Devices as the driver reports them. |
 | default | device_access | `xpu-smi/topology.txt` | GPU, NIC and CPU affinity matrix. |
 | default | root | `xpu-smi/<dev>/discovery.json` | Detailed properties of the device. |
@@ -524,6 +537,12 @@ Notes on the Linux table:
   thread in state `D` with a wait channel such as `dma_fence_default_wait` is waiting on the GPU.
   The process's memory map lock can be held by a thread stuck in the driver, so `/proc/<pid>/maps`
   and `environ` are read last, through a guard group of the process's own.
+- `devices/probe.txt` exists only with `--probe`, whatever the profile, and runs last of the host
+  sources, after everything that only reads. It names each Level Zero device (name, PCI device id,
+  `maxMemAllocSize`), the result and time of every call (`zeContextCreate`, `zeMemAllocDevice`,
+  `zeCommandListCreateImmediate` on queue group 0, `zeCommandListAppendMemoryFill`,
+  `zeCommandListHostSynchronize` with a 5 s timeout, `zeDeviceGetStatus`) and a verdict; the first
+  `result:` line sums them up.
 - `system/iomem` needs `sys_admin`: without it the kernel prints every address as zero, so the
   file would say nothing. `system/cpuinfo` prints one block per kind of CPU with the processors
   that share it, not one per logical CPU. `system/env.txt` records where the diagnostic tools
@@ -635,7 +654,7 @@ and the manifest `gate` entry use these five names:
 | Gate | Needs (exact text) | Covers |
 |---|---|---|
 | `kernel_log` | root, CAP_SYSLOG, membership of the 'adm' or 'systemd-journal' group, or sysctl kernel.dmesg_restrict=0 | `kernel/kmsg.txt`, `kernel/kmsg-prev-boot.txt`, `system/syslog` |
-| `device_access` | membership of the 'render' group, or root | the `xpu-smi` queries, `clinfo`, `vainfo`, `vulkaninfo`, `eglinfo`, `sycl-ls`, `intel_gpu_top` |
+| `device_access` | membership of the 'render' group, or root | the `xpu-smi` queries, `clinfo`, `vainfo`, `vulkaninfo`, `eglinfo`, `sycl-ls`, `intel_gpu_top`, the `--probe` fill |
 | `root` | root | debugfs, coredumps, firmware crash logs, `drm-ras` counters, owner-only sysfs attributes, most `xe` module parameters, the `drm.debug` mask, DMI serial numbers, `iclg` crash logs, the detailed `xpu-smi discovery` (DMI tables), other users' DRM clients, and the environment, libraries and wait channels of another user's `--pid` process (the process's own user can read them too) |
 | `sys_admin` | root or CAP_SYS_ADMIN | PCI configuration space beyond the first 64 bytes: `lspci -vvv` link and AER detail, `lspci -xxxx`; `/proc/iomem` addresses |
 | `elevated` | an elevated (Administrator) prompt | Windows: `dumps/listings.txt`, `dumps/wer-kernel-reports.txt`, `system/power-requests.txt`, `system/bcdedit.txt` |
@@ -730,6 +749,7 @@ xe-bug-report-20261110T163000Z.zip
   system/    operating system, hardware and process environment
   kernel/    kernel log, driver modules and parameters, event logs
   devices/   <dev>/ power state, sysfs attributes, BARs, IOMMU, display, debugfs, drm-ras counters (Linux);
+             probe.txt, the --probe result (Linux);
              driver and device listings (Windows)
   pci/       lspci output per GPU and upstream bridge (Linux)
   processes/ <pid>/ status, GPU environment and GPU libraries of each --pid process (Linux)
@@ -909,6 +929,14 @@ A GPU problem often comes with a hung driver, and a hung read must not hang the 
 - `--timeout` bounds the whole run (default 600 seconds, `0` disables it). When it is reached, the
   remaining sources are recorded as `skipped` ("collector deadline reached") and the archive is still
   finished and written.
+- `--probe` is the only source that submits work to the GPU. It runs in a child process (the
+  `xe-bug-report` executable started again with an internal argument) that loads
+  `libze_loader.so.1` itself; the collector links no GPU library. The child waits at most 5 seconds
+  for each fill, writes each step as it finishes it, and is killed with its process group after 10
+  seconds, so a driver call that never returns costs the child, never the collection; the report
+  then says which call it was in. It ends without running the driver's exit handlers, which can hang
+  on a wedged GPU. A child in uninterruptible sleep in the driver cannot be killed (see below); the
+  collector stops waiting for it about 2 seconds after the kill.
 - If the main thread is stuck somewhere no limit covers, a backstop thread ends the process with
   exit code 124 sixty seconds after the deadline, after removing `<output>.partial`.
 - A child process in uninterruptible kernel sleep cannot be killed. After a backstop exit, children
