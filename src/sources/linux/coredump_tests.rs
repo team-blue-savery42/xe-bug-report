@@ -52,3 +52,103 @@ fn a_finished_run_maps_to_an_artifact() {
     assert_eq!(run(ChildOutcome::Exited(0), b"", false).status, Status::Skipped);
     assert_eq!(run(ChildOutcome::SpawnFailed("x".to_owned()), b"", false).status, Status::Failed);
 }
+
+const INFO_GPU: &str = "           PID: 1234 (render)
+  Command Line: /opt/acme-corp/project-x/bin/render --input /home/someone/secret.spv --token=abc
+    Executable: /opt/acme-corp/project-x/bin/render
+        Signal: 11 (SEGV)
+       Message: Process 1234 (render) of user 1000 dumped core.
+
+                Stack trace of thread 1234:
+                #0  0x00007f50cae4504b n/a (libze_intel_gpu.so.1 + 0x4504b)
+                #1  0x00007f50cb550a9d zeCommandListAppendLaunchKernel (libze_loader.so.1 + 0x50a9d)
+                #2  0x000055719d6d6045 _start (render + 0x1045)
+                #3  0x000055719d6d6045 n/a (/opt/acme-corp/project-x/bin/render + 0x2f3d)
+";
+
+const INFO_OTHER: &str = "           PID: 1235 (python3)
+                Stack trace of thread 1235:
+                #0  0x00007f50cae4504b kill (libc.so.6 + 0x4504b)
+                Module libigc.so.2 from rpm intel-igc-2.41
+";
+
+fn exited(output: &str) -> ChildResult {
+    ChildResult {
+        outcome: ChildOutcome::Exited(0),
+        output: output.as_bytes().to_vec(),
+        truncated: false,
+        elapsed: Duration::ZERO,
+    }
+}
+
+#[test]
+fn crash_pids_come_from_the_list_rows() {
+    assert_eq!(crash_pids(LIST), [1234, 1235]);
+    // No time zone column, and lines that are not rows.
+    assert_eq!(
+        crash_pids("TIME PID UID\nWed 2026-11-11 10:00:00 77 0 0 SIGSEGV\nNo coredumps found.\n"),
+        [77]
+    );
+    assert!(crash_pids("").is_empty());
+}
+
+#[test]
+fn only_stack_frames_in_the_gpu_runtime_count() {
+    assert!(has_gpu_frame(INFO_GPU));
+    // A module list entry is not a frame.
+    assert!(!has_gpu_frame(INFO_OTHER));
+    for library in GPU_RUNTIME_FRAMES {
+        assert!(has_gpu_frame(&format!("    #3  0x1 n/a ({library}.so + 0x10)\n")), "{library}");
+    }
+}
+
+#[test]
+fn the_command_line_and_directories_are_not_kept() {
+    let text = privacy_filtered(INFO_GPU);
+    assert!(text.contains("  Command Line: (omitted)\n"), "{text}");
+    assert!(text.contains("    Executable: render\n"), "{text}");
+    assert!(!text.contains("acme") && !text.contains("secret") && !text.contains("token"), "{text}");
+    assert!(text.contains("#0  0x00007f50cae4504b n/a (libze_intel_gpu.so.1 + 0x4504b)"), "{text}");
+    assert!(text.contains("#3  0x000055719d6d6045 n/a (render + 0x2f3d)\n"), "{text}");
+}
+
+#[test]
+fn up_to_three_newest_crashes_are_examined_and_gpu_ones_kept() {
+    let list = "TIME PID\n\
+Wed 2026-11-11 10:00:04 UTC 5 0\nWed 2026-11-11 10:00:03 UTC 4 0\n\
+Wed 2026-11-11 10:00:02 UTC 3 0\nWed 2026-11-11 10:00:01 UTC 2 0\n";
+    let asked = std::sync::Mutex::new(Vec::new());
+    let out = backtraces_from("tools/coredump-*.txt", &ChildOutcome::Exited(0), list.as_bytes(), |pid| {
+        asked.lock().unwrap().push(pid);
+        exited(if pid == 4 || pid == 2 { INFO_GPU } else { INFO_OTHER })
+    });
+    assert_eq!(*asked.lock().unwrap(), [5, 4, 3]);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].rel_path, "tools/coredump-1.txt");
+    assert_eq!(out[0].status, Status::Collected);
+    assert_eq!(out[0].via, "coredumpctl info --no-pager 4");
+}
+
+#[test]
+fn nothing_to_keep_is_a_skip_with_a_reason() {
+    let none = backtraces_from("tools/coredump-*.txt", &ChildOutcome::Exited(0), LIST.as_bytes(), |_| {
+        exited(INFO_OTHER)
+    });
+    assert_eq!(none.len(), 1);
+    assert_eq!((none[0].rel_path.as_str(), none[0].status), ("tools/coredump-*.txt", Status::Skipped));
+    assert_eq!(none[0].reason, "none of the 2 newest crashes has a stack frame in a GPU runtime library");
+    let empty = backtraces_from("p", &ChildOutcome::Exited(1), b"No coredumps found.\n", |_| unreachable!());
+    assert_eq!(empty[0].reason, "no recent crash");
+    let missing = backtraces_from("p", &ChildOutcome::NotFound, b"", |_| unreachable!());
+    assert_eq!(missing[0].reason, "coredumpctl not installed");
+    assert_eq!(
+        backtraces_from("p", &ChildOutcome::TimedOut, b"", |_| unreachable!())[0].status,
+        Status::TimedOut
+    );
+    // A failed info run is passed over.
+    let failed = backtraces_from("p", &ChildOutcome::Exited(0), LIST.as_bytes(), |_| ChildResult {
+        outcome: ChildOutcome::TimedOut,
+        ..exited(INFO_GPU)
+    });
+    assert_eq!(failed[0].status, Status::Skipped);
+}

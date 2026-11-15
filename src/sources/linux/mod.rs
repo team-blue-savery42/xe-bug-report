@@ -836,6 +836,16 @@ fn tool_sources(options: &SourceOptions, tools: &Tools) -> Vec<Source> {
             .timeout(coredump::SOURCE_TIMEOUT)
             .group(TOOL_GROUP),
         );
+        out.push(
+            builtin(
+                "tools/coredump-*.txt",
+                move |_| coredump::gpu_backtraces("tools/coredump-*.txt", since),
+                Profile::Full,
+                "Crash reports with stack traces of recent crashes in the GPU runtime libraries.",
+            )
+            .timeout(coredump::BACKTRACE_SOURCE_TIMEOUT)
+            .group(TOOL_GROUP),
+        );
     }
     // Last of the host sources: it submits work to the GPU, so nothing that only reads should wait
     // behind it. A guard group of its own, so a hung tool before it does not skip it.
