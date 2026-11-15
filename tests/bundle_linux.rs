@@ -182,6 +182,18 @@ fn list_full_matches_the_golden_table() {
 }
 
 #[test]
+fn the_opt_in_rows_are_listed_only_when_asked() {
+    let plain = list(&["--full"]);
+    assert!(!plain.iter().any(|r| r.path == "devices/probe.txt" || r.path.starts_with("processes/")));
+    let pid = std::process::id().to_string();
+    let rows = list(&["--minimal", "--probe", "--pid", &pid]);
+    let probe = rows.iter().find(|r| r.path == "devices/probe.txt").expect("the probe row");
+    assert_eq!((probe.profile.as_str(), probe.needs.as_str()), ("minimal", "device_access"));
+    let process = rows.iter().find(|r| r.path == format!("processes/{pid}/")).expect("the process row");
+    assert_eq!((process.profile.as_str(), process.needs.as_str()), ("minimal", "root"));
+}
+
+#[test]
 fn list_profiles_nest() {
     let paths =
         |rows: Vec<ListRow>| rows.into_iter().map(|r| r.path).collect::<std::collections::BTreeSet<_>>();

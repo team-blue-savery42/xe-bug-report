@@ -341,3 +341,13 @@ fn a_process_that_is_not_running_is_named() {
     assert!(matches!(error, Error::UnknownProcess(77)), "{error:?}");
     assert_eq!(error.to_string(), "No process with id 77 is running on this system");
 }
+
+#[test]
+fn probe_is_off_unless_asked() {
+    assert!(!parse(&[]).unwrap().probe);
+    if cfg!(target_os = "linux") {
+        assert!(parse(&["--probe"]).unwrap().probe);
+    } else {
+        assert_eq!(usage_message(&["--probe"]).0, "--probe is supported on Linux only");
+    }
+}

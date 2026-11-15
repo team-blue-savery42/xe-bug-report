@@ -14,6 +14,7 @@ pub mod extract;
 pub mod gpus;
 pub mod identity;
 pub mod kmsg;
+pub mod liveness;
 pub mod packages;
 pub mod pci_config;
 pub mod pcie;
@@ -52,6 +53,8 @@ const TOOL_GROUP: &str = "usermode";
 const USER_FILES_GROUP: &str = "user-files";
 /// The guard group of the scan for processes that hold the GPU open.
 const CLIENTS_GROUP: &str = "drm-clients";
+/// The guard group of the Level Zero liveness probe.
+const PROBE_GROUP: &str = "probe";
 /// Time a `--pid` source gets: up to a few hundred small reads of the process's `/proc` files.
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(30);
 /// The root of sysfs.
@@ -832,6 +835,22 @@ fn tool_sources(options: &SourceOptions, tools: &Tools) -> Vec<Source> {
             )
             .timeout(coredump::SOURCE_TIMEOUT)
             .group(TOOL_GROUP),
+        );
+    }
+    // Last of the host sources: it submits work to the GPU, so nothing that only reads should wait
+    // behind it. A guard group of its own, so a hung tool before it does not skip it.
+    if options.probe {
+        out.push(
+            builtin(
+                "devices/probe.txt",
+                |_| liveness::liveness_probe("devices/probe.txt"),
+                Profile::Minimal,
+                "Whether each GPU completes a small memory fill (--probe; submits work to the GPU).",
+            )
+            .gate(Gate::DeviceAccess)
+            .available(system::any_render_node_accessible)
+            .timeout(liveness::SOURCE_TIMEOUT)
+            .group(PROBE_GROUP),
         );
     }
     out

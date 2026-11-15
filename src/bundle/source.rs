@@ -383,6 +383,8 @@ pub struct SourceOptions {
     pub devices: Vec<GpuDevice>,
     /// Processes to describe (`--pid`), already checked to exist.
     pub pids: Vec<u32>,
+    /// `--probe`: run the Level Zero liveness probe, which submits work to the GPU.
+    pub probe: bool,
     /// `xpu-smi dump` samples per device, 1 s apart; 0 disables.
     pub samples: u32,
     /// Log window; None for the per-OS default.
