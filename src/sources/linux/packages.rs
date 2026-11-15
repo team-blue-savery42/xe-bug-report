@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! The package-manager sources.
 //!
-//! Only the package managers installed on the host get sources: a system has one, and the other is
-//! not a missing source. A missing tool is "not installed", never "needs root".
+//! Only the package managers installed on the host get sources: a system has one, and the others
+//! are not missing sources. A missing tool is "not installed", never "needs root".
 
 use std::path::Path;
 
@@ -64,6 +64,8 @@ pub const PKG_KEEP: &[&str] = &[
 const DPKG_LOG_MAX: Bytes = Bytes::mib(4);
 /// Size cap of `/var/log/apt/history.log`.
 const APT_HISTORY_MAX: Bytes = Bytes::mib(1);
+/// Size cap of the GPU-related lines of `/var/log/pacman.log`.
+const PACMAN_LOG_MAX: Bytes = Bytes::mib(1);
 
 /// The package sources for the package managers `tools` says are installed, in table order.
 pub fn package_sources(tools: &Tools) -> Vec<Source> {
@@ -86,6 +88,17 @@ pub fn package_sources(tools: &Tools) -> Vec<Source> {
                 &["rpm", "-qa", "--qf", "%{NAME}\\t%{VERSION}-%{RELEASE}\\t%{ARCH}\\n"],
                 Profile::Minimal,
                 "Installed GPU-related RPM packages.",
+            )
+            .keep_lines(PKG_KEEP),
+        );
+    }
+    if tools.pacman {
+        out.push(
+            Source::command(
+                "packages/pacman.txt",
+                &["pacman", "-Q"],
+                Profile::Minimal,
+                "Installed GPU-related Arch Linux packages.",
             )
             .keep_lines(PKG_KEEP),
         );
@@ -126,6 +139,21 @@ pub fn package_sources(tools: &Tools) -> Vec<Source> {
                 "RPM packages by install time.",
             )
             .keep_lines(PKG_KEEP),
+        );
+    }
+    // The log is filtered before the cap, so the tail holds the last GPU-related transactions
+    // however busy the rest of the log is.
+    if tools.pacman {
+        out.push(
+            Source::file(
+                "packages/pacman-log.txt",
+                "/var/log/pacman.log",
+                Profile::Default,
+                "Recent pacman installs and upgrades of GPU-related packages.",
+            )
+            .keep_lines(PKG_KEEP)
+            .tail()
+            .cap(PACMAN_LOG_MAX),
         );
     }
     out

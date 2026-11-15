@@ -56,10 +56,12 @@ default  sys_admin      pci/0000-03-00.0/lspci-vvv-0000-00-01.0.txt  PCI capabil
 default  sys_admin      pci/0000-03-00.0/lspci-xxxx.txt              Raw PCI configuration space, including extended capabilities, without the serial number.
 minimal  -              packages/dpkg.txt                            Installed GPU-related Debian packages.
 minimal  -              packages/rpm.txt                             Installed GPU-related RPM packages.
+minimal  -              packages/pacman.txt                          Installed GPU-related Arch Linux packages.
 default  -              packages/repositories.txt                    Package repositories the driver and libraries were installed from.
 default  -              packages/dpkg-log.txt                        Recent Debian package installs and upgrades.
 default  -              packages/apt-history.log                     Recent apt transactions.
 default  -              packages/rpm-last.txt                        RPM packages by install time.
+default  -              packages/pacman-log.txt                      Recent pacman installs and upgrades of GPU-related packages.
 full     kernel_log     system/syslog                                Host system log.
 full     device_access  tools/clinfo.txt                             OpenCL platforms and devices.
 default  device_access  tools/clinfo-list.txt                        OpenCL platforms and devices, one line each.

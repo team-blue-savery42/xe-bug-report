@@ -33,6 +33,7 @@ fn options(profile: Profile, samples: u32) -> SourceOptions {
 const DEBIAN: Tools = Tools {
     dpkg: true,
     rpm: false,
+    pacman: false,
     iclg: false,
     vulkaninfo: false,
     eglinfo: false,
@@ -46,6 +47,7 @@ const WITH_ICLG: Tools = Tools { rpm: true, iclg: true, ..DEBIAN };
 const ALL_TOOLS: Tools = Tools {
     dpkg: true,
     rpm: true,
+    pacman: true,
     iclg: true,
     vulkaninfo: true,
     eglinfo: true,
@@ -492,8 +494,14 @@ fn package_sources_follow_the_installed_tools() {
     let redhat = sources_with(&o, &Tools { dpkg: false, rpm: true, ..DEBIAN });
     assert!(!has(&redhat, "packages/dpkg.txt"));
     assert!(has(&redhat, "packages/rpm.txt") && has(&redhat, "packages/rpm-last.txt"));
+    assert!(!has(&debian, "packages/pacman.txt") && !has(&debian, "packages/pacman-log.txt"));
+    let arch = sources_with(&o, &Tools { dpkg: false, pacman: true, ..DEBIAN });
+    assert!(has(&arch, "packages/pacman.txt") && has(&arch, "packages/pacman-log.txt"));
+    assert!(!has(&arch, "packages/dpkg.txt"));
     let neither = sources_with(&o, &Tools::default());
-    assert!(!neither.iter().any(|s| s.rel_path.contains("dpkg.txt") || s.rel_path.contains("rpm")));
+    assert!(!neither.iter().any(|s| {
+        s.rel_path.contains("dpkg.txt") || s.rel_path.contains("rpm") || s.rel_path.contains("pacman")
+    }));
 }
 
 #[test]

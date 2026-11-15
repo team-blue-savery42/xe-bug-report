@@ -124,6 +124,7 @@ fn version_line(text: &str) -> Option<String> {
 pub struct Tools {
     pub dpkg: bool,
     pub rpm: bool,
+    pub pacman: bool,
     /// Firmware crash log extraction.
     pub iclg: bool,
     pub vulkaninfo: bool,
@@ -141,6 +142,7 @@ impl Tools {
         Self {
             dpkg: present("dpkg-query"),
             rpm: present("rpm"),
+            pacman: present("pacman"),
             iclg: present("iclg"),
             vulkaninfo: present("vulkaninfo"),
             eglinfo: present("eglinfo"),
