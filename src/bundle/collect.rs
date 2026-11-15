@@ -618,7 +618,7 @@ impl Collector<'_, '_> {
         if !valid_entry_name(rel_path) {
             return Delivered { status: DeliverStatus::InvalidName, truncated: false, bytes: Bytes(0) };
         }
-        let text = content == Content::Text;
+        let text = content.of(&data) == Content::Text;
         if text && !source.keep_lines.is_empty() {
             data = filter_lines(&data, &source.keep_lines);
         }
@@ -1108,7 +1108,7 @@ impl Collector<'_, '_> {
                     continue;
                 }
             };
-            let data = if source.content == Content::Text && self.options.rules.any() {
+            let data = if source.content.of(&read.data) == Content::Text && self.options.rules.any() {
                 match text_for_redaction(&read.data) {
                     Some(text) => self.redact_data(&entry, &text),
                     None => read.data,

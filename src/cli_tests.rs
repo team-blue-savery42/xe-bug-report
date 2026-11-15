@@ -351,3 +351,22 @@ fn probe_is_off_unless_asked() {
         assert_eq!(usage_message(&["--probe"]).0, "--probe is supported on Linux only");
     }
 }
+
+#[test]
+fn attach_is_repeatable_and_keeps_the_order() {
+    assert!(parse(&[]).unwrap().attachments.is_empty());
+    let args = parse(&["--attach", "b.spv", "--attach=dump dir", "--attach", "a,b"]).unwrap();
+    assert_eq!(args.attachments, [PathBuf::from("b.spv"), PathBuf::from("dump dir"), PathBuf::from("a,b")]);
+    assert_eq!(usage_message(&["--attach", ""]).0, "The --attach path can't be empty");
+}
+
+#[test]
+fn an_attachment_that_cannot_be_found_is_named() {
+    let paths = [PathBuf::from("ok"), PathBuf::from("gone.spv")];
+    assert!(check_attachments(&paths, |_| Ok(())).is_ok());
+    let error = check_attachments(&paths, |path| {
+        if path.ends_with("gone.spv") { Err("No such file or directory".to_owned()) } else { Ok(()) }
+    })
+    .unwrap_err();
+    assert_eq!(error.to_string(), "cannot attach gone.spv: No such file or directory");
+}
